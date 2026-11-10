@@ -122,6 +122,7 @@ class TgCall(PyTgCalls):
                     header_lines.append(f"{name}: {value}")
 
             if header_lines:
+                # Real CRLF line endings are required by FFmpeg.
                 header_value = "\r\n".join(header_lines) + "\r\n"
                 ffmpeg_parts.extend([
                     "-headers",
@@ -219,7 +220,7 @@ class TgCall(PyTgCalls):
                 )
 
                 if not source:
-                    raise exceptions.NoAudioSourceFound
+                    raise exceptions.NoAudioSourceFound(str(media.id))
 
                 stream = self._build_media_stream(
                     media,

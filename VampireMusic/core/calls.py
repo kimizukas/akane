@@ -15,6 +15,31 @@ from pytgcalls.pytgcalls_session import PyTgCallsSession
 
 from VampireMusic import app, config, db, lang, logger, queue, thumb, userbot, yt
 from VampireMusic.helpers import Media, Track, buttons
+import hashlib
+import hmac
+import os
+
+def _internal_stream_url(video_id: str) -> str:
+    user_id = int(app.id)
+    expires = int(time.time()) + 3600
+
+    payload = f"{user_id}:{video_id}:{expires}"
+
+    signature = hmac.new(
+        str(config.BOT_TOKEN).encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    token = f"{user_id}.{expires}.{signature}"
+    port = int(os.getenv("MUSIC_SERVER_PORT", "8088"))
+
+    return (
+        f"http://127.0.0.1:{port}/api/stream/"
+        f"{video_id}?token={token}"
+    )
+
+
 
 
 class TgCall(PyTgCalls):
@@ -69,25 +94,40 @@ class TgCall(PyTgCalls):
         force_refresh: bool = False,
     ):
         if isinstance(media, Track) and not media.video:
-            if media.file_path and not force_refresh:
-                return media.file_path, getattr(media, "stream_headers", None)
 
+            # Existing downloaded local files stay unchanged.
+            if (
+                media.file_path
+                and not media.file_path.startswith(
+                    ("http://", "https://")
+                )
+            ):
+                return media.file_path, None
+
+            # Resolve/refresh YouTube URL and populate the shared cache.
             stream = await yt.stream(
                 media.id,
                 force_refresh=force_refresh,
             )
 
-            if not stream:
+            if not stream or not stream.get("url"):
                 return None, None
 
-            media.file_path = stream["url"]
-            media.stream_headers = stream.get("headers") or {}
-            return media.file_path, media.stream_headers
+            # Voice chat uses the same working proxy as the Mini App.
+            source = _internal_stream_url(str(media.id))
+
+            media.file_path = source
+            media.stream_headers = {}
+
+            return source, None
 
         if media.file_path:
             return media.file_path, None
 
         return None, None
+
+
+
 
     def _build_media_stream(
         self,

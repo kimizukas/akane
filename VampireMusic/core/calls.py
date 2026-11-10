@@ -196,7 +196,7 @@ class TgCall(PyTgCalls):
 
 
 
-async def play_media(
+    async def play_media(
     self,
     chat_id: int,
     message: Message,

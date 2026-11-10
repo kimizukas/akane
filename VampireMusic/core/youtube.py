@@ -1,3 +1,4 @@
+
 import asyncio
 import logging
 import os
@@ -157,24 +158,25 @@ def _cache_stream(data: dict):
 def _resolve_audio_stream(video_id: str):
     source = YOUTUBE_URL.format(video_id)
 
-    options = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
+    # Use the same yt-dlp options as search/download.
+    # This makes the existing cookies.txt available to playback too.
+    options = _ydl_options()
+    options.update({
         "ignoreerrors": False,
-        "socket_timeout": 15,
+        "noplaylist": True,
+        "extract_flat": False,
+        "socket_timeout": 20,
         "retries": 2,
         "fragment_retries": 2,
         "format": "bestaudio/best",
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android_vr"],
-            },
-        },
-    }
+    })
 
-    # android_vr is intentionally used without account cookies.
-    # Its GVS requests currently do not require a PO Token.
+    if "cookiefile" not in options:
+        logger.warning(
+            "YouTube cookies file is missing or empty: %s",
+            COOKIES_FILE,
+        )
+
     with yt_dlp.YoutubeDL(options) as ydl:
         info = ydl.extract_info(source, download=False)
 
@@ -471,6 +473,35 @@ class YouTubeAPI:
                 type(exc).__name__,
             )
             return []
+
+    async def details(self, link: str, videoid: Union[bool, str] = None):
+        if videoid:
+            link = self.base + str(link)
+
+        info = await asyncio.to_thread(
+            _extract_info,
+            normalize_url(link),
+        )
+
+        if not info:
+            raise RuntimeError("Unable to fetch YouTube video details.")
+
+        duration_sec = int(info.get("duration") or 0)
+        title = info.get("title") or "Unknown title"
+        views = info.get("view_count") or 0
+
+        thumbnail = info.get("thumbnail")
+        if not thumbnail:
+            thumbnails = info.get("thumbnails") or []
+            if thumbnails:
+                thumbnail = thumbnails[-1].get("url")
+
+        return (
+            title,
+            seconds_to_time(duration_sec),
+            views,
+            thumbnail,
+        )
 
     async def title(self, link: str, videoid: Union[bool, str] = None):
         details = await self.details(link, videoid)

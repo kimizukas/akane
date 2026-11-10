@@ -1,17 +1,27 @@
 
+import asyncio
 import hashlib
 import hmac
 import json
 import logging
+import mimetypes
 import os
 import re
 import time
 from pathlib import Path
 from urllib.parse import parse_qsl
 
+import aiohttp
+import yt_dlp
 from aiohttp import web
 
 from VampireMusic import app, config, yt
+from VampireMusic.core.youtube import (
+    COOKIES_FILE,
+    YOUTUBE_URL,
+    _make_track,
+    _ydl_options,
+)
 
 logger = logging.getLogger("VampireMusic.music_server")
 
@@ -24,6 +34,7 @@ PORT = int(os.getenv("MUSIC_SERVER_PORT", "8088"))
 
 AUTH_MAX_AGE = 24 * 60 * 60
 MAX_REQUEST_SIZE = 1024 * 1024
+VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 _runner = None
 _site = None
@@ -127,16 +138,118 @@ def verify_stream_token(video_id: str, token: str):
         return None
 
 
+def _search_without_cookies(query: str, limit: int = 10):
+    """Retry YouTube search without a cookie file."""
+    options = _ydl_options()
+    options.pop("cookiefile", None)
+    options["ignoreerrors"] = False
+
+    with yt_dlp.YoutubeDL(options) as ydl:
+        data = ydl.extract_info(
+            f"ytsearch{limit}:{query}",
+            download=False,
+        )
+
+    tracks = []
+
+    for entry in (data or {}).get("entries") or []:
+        track = _make_track(entry)
+
+        if track:
+            tracks.append(track)
+
+    return tracks
+
+
+def _resolve_audio_stream(video_id: str):
+    """
+    Resolve a direct audio URL.
+
+    Try cookies first when available. If that fails, retry without cookies.
+    Prefer original Opus audio and avoid downloading the complete track.
+    """
+    source = YOUTUBE_URL.format(video_id)
+
+    has_cookies = (
+        COOKIES_FILE.is_file()
+        and COOKIES_FILE.stat().st_size > 0
+    )
+
+    attempts = [True, False] if has_cookies else [False]
+    last_error = None
+
+    for use_cookies in attempts:
+        options = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "ignoreerrors": False,
+            "socket_timeout": 20,
+            "retries": 2,
+            "fragment_retries": 2,
+            "format": "bestaudio[acodec=opus]/bestaudio",
+        }
+
+        if use_cookies:
+            options["cookiefile"] = str(COOKIES_FILE)
+
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(source, download=False)
+
+            if not info or not info.get("url"):
+                raise RuntimeError("No direct audio URL returned.")
+
+            return {
+                "url": info["url"],
+                "headers": info.get("http_headers") or {},
+                "ext": info.get("ext") or "webm",
+            }
+
+        except Exception as exc:
+            last_error = exc
+            mode = "with cookies" if use_cookies else "without cookies"
+
+            logger.warning(
+                "Audio extraction failed %s: %s",
+                mode,
+                type(exc).__name__,
+            )
+
+    raise RuntimeError(
+        f"Unable to resolve audio stream: {type(last_error).__name__}"
+    )
+
+
+def _audio_content_type(ext: str):
+    known = {
+        "webm": "audio/webm",
+        "m4a": "audio/mp4",
+        "mp4": "audio/mp4",
+        "opus": "audio/ogg",
+        "ogg": "audio/ogg",
+        "mp3": "audio/mpeg",
+    }
+
+    return known.get(ext.lower()) or mimetypes.guess_type(
+        f"audio.{ext}"
+    )[0] or "application/octet-stream"
+
+
 @web.middleware
 async def security_middleware(request, handler):
     response = await handler(request)
 
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "SAMEORIGIN"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = (
-        "camera=(), microphone=(), geolocation=()"
-    )
+    # Streaming responses set these headers before prepare().
+    if not response.prepared:
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["Referrer-Policy"] = (
+            "strict-origin-when-cross-origin"
+        )
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=()"
+        )
 
     return response
 
@@ -179,11 +292,9 @@ async def music_page(request):
 
 
 async def get_me(request):
-    user = request["telegram_user"]
-
     return web.json_response({
         "ok": True,
-        "user": user,
+        "user": request["telegram_user"],
     })
 
 
@@ -207,6 +318,7 @@ async def search_tracks(request):
         )
 
     try:
+        # First use the existing YouTube search implementation.
         tracks = await yt.search_multi(
             query=query,
             m_id=0,
@@ -214,10 +326,25 @@ async def search_tracks(request):
             limit=10,
         )
 
+        # If cookie-based search fails, retry without cookies.
+        if not tracks:
+            logger.info(
+                "Retrying Mini App search without cookies."
+            )
+            tracks = await asyncio.to_thread(
+                _search_without_cookies,
+                query,
+                10,
+            )
+
         results = []
 
         for track in tracks:
+            if not VIDEO_ID_RE.fullmatch(str(track.id)):
+                continue
+
             expires = int(time.time()) + 900
+
             token = make_stream_token(
                 user["id"],
                 track.id,
@@ -232,7 +359,9 @@ async def search_tracks(request):
                 "duration_sec": track.duration_sec,
                 "thumbnail": track.thumbnail,
                 "url": track.url,
-                "stream_url": f"/api/stream/{track.id}?token={token}",
+                "stream_url": (
+                    f"/api/stream/{track.id}?token={token}"
+                ),
             })
 
         return web.json_response({
@@ -253,46 +382,107 @@ async def stream_track(request):
     video_id = request.match_info["video_id"]
     token = request.query.get("token", "")
 
-    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+    if not VIDEO_ID_RE.fullmatch(video_id):
         raise web.HTTPBadRequest(text="Invalid video ID.")
 
-    user_id = verify_stream_token(video_id, token)
-
-    if not user_id:
-        raise web.HTTPForbidden(text="Invalid or expired stream token.")
+    if not verify_stream_token(video_id, token):
+        raise web.HTTPForbidden(
+            text="Invalid or expired stream token."
+        )
 
     try:
-        file_path = await yt.download(video_id)
-
-        if not file_path:
-            raise web.HTTPNotFound(text="Audio not available.")
-
-        path = Path(file_path).resolve()
-        root = DOWNLOAD_DIR.resolve()
-
-        if root not in path.parents or not path.is_file():
-            raise web.HTTPNotFound(text="Audio file not found.")
-
-        import mimetypes
-
-        content_type = mimetypes.guess_type(str(path))[0]
-        content_type = content_type or "application/octet-stream"
-
-        return web.FileResponse(
-            path,
-            headers={
-                "Content-Type": content_type,
-                "Cache-Control": "private, no-store",
-                "Accept-Ranges": "bytes",
-            },
+        # Resolve a fresh direct URL for every playback request.
+        stream = await asyncio.to_thread(
+            _resolve_audio_stream,
+            video_id,
         )
+
+        headers = dict(stream["headers"])
+
+        # Forward browser seeking requests to the source.
+        range_header = request.headers.get("Range")
+
+        if range_header:
+            headers["Range"] = range_header
+
+        timeout = aiohttp.ClientTimeout(
+            total=None,
+            connect=15,
+            sock_read=60,
+        )
+
+        async with aiohttp.ClientSession(
+            timeout=timeout,
+            headers={"User-Agent": headers.get(
+                "User-Agent",
+                "Mozilla/5.0",
+            )},
+        ) as session:
+
+            async with session.get(
+                stream["url"],
+                headers=headers,
+                allow_redirects=True,
+            ) as upstream:
+
+                if upstream.status >= 400:
+                    logger.warning(
+                        "Audio CDN returned HTTP %s for %s",
+                        upstream.status,
+                        video_id,
+                    )
+                    raise web.HTTPBadGateway(
+                        text="Audio source unavailable."
+                    )
+
+                response_headers = {
+                    "Content-Type": upstream.headers.get(
+                        "Content-Type",
+                        _audio_content_type(stream["ext"]),
+                    ),
+                    "Cache-Control": "private, no-store",
+                    "X-Content-Type-Options": "nosniff",
+                    "Accept-Ranges": upstream.headers.get(
+                        "Accept-Ranges",
+                        "bytes",
+                    ),
+                }
+
+                for name in (
+                    "Content-Length",
+                    "Content-Range",
+                    "ETag",
+                    "Last-Modified",
+                ):
+                    value = upstream.headers.get(name)
+
+                    if value:
+                        response_headers[name] = value
+
+                response = web.StreamResponse(
+                    status=upstream.status,
+                    headers=response_headers,
+                )
+
+                await response.prepare(request)
+
+                async for chunk in upstream.content.iter_chunked(
+                    64 * 1024
+                ):
+                    await response.write(chunk)
+
+                await response.write_eof()
+                return response
 
     except web.HTTPException:
         raise
+    except (ConnectionResetError, asyncio.CancelledError):
+        raise
     except Exception:
-        logger.exception("Mini App stream failed.")
-        raise web.HTTPInternalServerError(
-            text="Unable to stream audio."
+        logger.exception("Mini App direct stream failed.")
+
+        raise web.HTTPBadGateway(
+            text="Unable to start audio stream."
         )
 
 
@@ -371,7 +561,10 @@ def create_app():
 
     application.router.add_get("/api/me", get_me)
     application.router.add_post("/api/search", search_tracks)
-    application.router.add_get("/api/stream/{video_id}", stream_track)
+    application.router.add_get(
+        "/api/stream/{video_id}",
+        stream_track,
+    )
 
     application.router.add_get(
         "/api/groups/{chat_id}/membership",

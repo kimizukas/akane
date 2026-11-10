@@ -45,7 +45,9 @@ async def main():
         logger.info("Loaded %s modules.", len(all_modules))
 
         if config.COOKIES_URL:
-            await yt.save_cookies(config.COOKIES_URL)
+            for cookie_url in config.COOKIES_URL:
+                if await yt.save_cookies(cookie_url):
+                    break
 
         sudoers = await db.get_sudoers()
         app.sudoers.update(sudoers)

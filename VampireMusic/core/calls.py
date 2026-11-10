@@ -27,7 +27,6 @@ class TgCall(PyTgCalls):
         await db.playing(chat_id, paused=True)
 
         media = queue.get_current(chat_id)
-
         if media and media.played_at:
             media.time += int(time.time() - media.played_at)
             media.played_at = None
@@ -39,7 +38,6 @@ class TgCall(PyTgCalls):
         await db.playing(chat_id, paused=False)
 
         media = queue.get_current(chat_id)
-
         if media:
             media.played_at = time.time()
 
@@ -51,10 +49,7 @@ class TgCall(PyTgCalls):
 
         if media and media.message_id:
             try:
-                await app.delete_messages(
-                    chat_id,
-                    media.message_id,
-                )
+                await app.delete_messages(chat_id, media.message_id)
             except Exception:
                 pass
 
@@ -63,10 +58,7 @@ class TgCall(PyTgCalls):
         await db.set_loop(chat_id, 0)
 
         try:
-            await client.leave_call(
-                chat_id,
-                close=False,
-            )
+            await client.leave_call(chat_id, close=False)
         except Exception:
             pass
 
@@ -74,22 +66,89 @@ class TgCall(PyTgCalls):
         self,
         media: Media | Track,
         seek_time: int = 0,
+        force_refresh: bool = False,
     ):
-        if media.file_path:
-            return media.file_path, None
-
         if isinstance(media, Track) and not media.video:
-            stream = await yt.stream(media.id)
+            if media.file_path and not force_refresh:
+                return media.file_path, getattr(media, "stream_headers", None)
+
+            stream = await yt.stream(
+                media.id,
+                force_refresh=force_refresh,
+            )
 
             if not stream:
                 return None, None
 
             media.file_path = stream["url"]
             media.stream_headers = stream.get("headers") or {}
-
             return media.file_path, media.stream_headers
 
+        if media.file_path:
+            return media.file_path, None
+
         return None, None
+
+    def _build_media_stream(
+        self,
+        media: Media | Track,
+        source: str,
+        stream_headers: dict | None,
+        seek_time: int = 0,
+    ):
+        ffmpeg_parts = []
+
+        if seek_time > 1:
+            ffmpeg_parts.extend(["-ss", str(int(seek_time))])
+
+        if not media.video:
+            ffmpeg_parts.append("-vn")
+
+        if isinstance(source, str) and source.startswith(("http://", "https://")):
+            allowed_headers = (
+                "User-Agent",
+                "Referer",
+                "Accept",
+                "Accept-Language",
+                "Origin",
+                "Cookie",
+            )
+
+            header_lines = []
+            for name in allowed_headers:
+                value = (stream_headers or {}).get(name)
+                if value:
+                    value = str(value).replace("\r", "").replace("\n", "")
+                    header_lines.append(f"{name}: {value}")
+
+            if header_lines:
+                header_value = "\r\n".join(header_lines) + "\r\n"
+                ffmpeg_parts.extend([
+                    "-headers",
+                    f'"{header_value}"',
+                ])
+
+            ffmpeg_parts.extend([
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5",
+                "-rw_timeout", "15000000",
+            ])
+
+        ffmpeg_params = " ".join(ffmpeg_parts) or None
+
+        return types.MediaStream(
+            media_path=source,
+            audio_parameters=types.AudioQuality.HIGH,
+            video_parameters=types.VideoQuality.HD_720p,
+            audio_flags=types.MediaStream.Flags.REQUIRED,
+            video_flags=(
+                types.MediaStream.Flags.AUTO_DETECT
+                if media.video
+                else types.MediaStream.Flags.IGNORE
+            ),
+            ffmpeg_parameters=ffmpeg_params,
+        )
 
     async def play_media(
         self,
@@ -130,69 +189,46 @@ class TgCall(PyTgCalls):
                 )
                 return await self.play_next(chat_id)
 
-            ffmpeg_parts = []
-
-            if seek_time > 1:
-                ffmpeg_parts.extend([
-                    "-ss",
-                    str(int(seek_time)),
-                ])
-
-            if not media.video:
-                ffmpeg_parts.append("-vn")
-
-            if isinstance(source, str) and source.startswith(("http://", "https://")):
-                allowed_headers = (
-                    "User-Agent",
-                    "Referer",
-                    "Accept",
-                    "Accept-Language",
-                )
-
-                header_lines = []
-
-                for name in allowed_headers:
-                    value = (stream_headers or {}).get(name)
-
-                    if value:
-                        value = str(value).replace("\r", "").replace("\n", "")
-                        header_lines.append(f"{name}: {value}")
-
-                if header_lines:
-                    header_value = "\\r\\n".join(header_lines) + "\\r\\n"
-
-                    ffmpeg_parts.extend([
-                        "-headers",
-                        f'"{header_value}"',
-                    ])
-
-                ffmpeg_parts.extend([
-                    "-reconnect",
-                    "1",
-                    "-reconnect_streamed",
-                    "1",
-                    "-reconnect_delay_max",
-                    "5",
-                    "-rw_timeout",
-                    "15000000",
-                ])
-
-            ffmpeg_params = " ".join(ffmpeg_parts) or None
-
-            stream = types.MediaStream(
-                media_path=source,
-                audio_parameters=types.AudioQuality.HIGH,
-                video_parameters=types.VideoQuality.HD_720p,
-                audio_flags=types.MediaStream.Flags.REQUIRED,
-                video_flags=(
-                    types.MediaStream.Flags.AUTO_DETECT
-                    if media.video
-                    else types.MediaStream.Flags.IGNORE
-                ),
-                ffmpeg_parameters=ffmpeg_params,
+            stream = self._build_media_stream(
+                media,
+                source,
+                stream_headers,
+                seek_time,
             )
 
-            await client.play(chat_id, stream)
+            try:
+                await client.play(chat_id, stream)
+
+            except (
+                exceptions.NoAudioSourceFound,
+                asyncio.TimeoutError,
+                TimeoutError,
+            ):
+                if not isinstance(media, Track) or media.video:
+                    raise
+
+                logger.warning(
+                    "Playback source failed in chat %s; refreshing YouTube URL.",
+                    chat_id,
+                )
+
+                source, stream_headers = await self._get_playback_source(
+                    media,
+                    seek_time,
+                    force_refresh=True,
+                )
+
+                if not source:
+                    raise exceptions.NoAudioSourceFound
+
+                stream = self._build_media_stream(
+                    media,
+                    source,
+                    stream_headers,
+                    seek_time,
+                )
+
+                await client.play(chat_id, stream)
 
             media.played_at = time.time()
 
@@ -286,9 +322,7 @@ class TgCall(PyTgCalls):
             )
 
             try:
-                await message.edit_text(
-                    _lang["error_no_audio"]
-                )
+                await message.edit_text(_lang["error_no_audio"])
             except Exception:
                 pass
 
@@ -302,38 +336,27 @@ class TgCall(PyTgCalls):
             return
 
         media = queue.get_current(chat_id)
-
         if not media:
             return
 
         if media.message_id:
             try:
-                await app.delete_messages(
-                    chat_id,
-                    media.message_id,
-                )
+                await app.delete_messages(chat_id, media.message_id)
             except Exception:
                 pass
 
-        # Resolve a fresh direct URL for replay.
         if isinstance(media, Track) and not media.video:
             media.file_path = None
             media.stream_headers = {}
 
         _lang = await lang.get_lang(chat_id)
-
         msg = await app.send_message(
             chat_id=chat_id,
             text=_lang["play_again"],
         )
-
         media.message_id = msg.id
 
-        await self.play_media(
-            chat_id,
-            msg,
-            media,
-        )
+        await self.play_media(chat_id, msg, media)
 
     async def play_next(
         self,
@@ -349,17 +372,11 @@ class TgCall(PyTgCalls):
 
         if current and current.message_id:
             try:
-                await app.delete_messages(
-                    chat_id,
-                    current.message_id,
-                )
+                await app.delete_messages(chat_id, current.message_id)
             except Exception:
                 pass
 
-        media = queue.get_next(
-            chat_id,
-            check=True,
-        )
+        media = queue.get_next(chat_id, check=True)
 
         if not media:
             autoplay_enabled = await db.get_autoplay(chat_id)
@@ -373,51 +390,40 @@ class TgCall(PyTgCalls):
                 )
 
                 tracks = [
-                    track
-                    for track in tracks
+                    track for track in tracks
                     if track.id != current.id
                 ]
 
                 if tracks:
                     import random
-
                     media = random.choice(tracks)
                     media.user = "🔄 ᴀᴜᴛᴏᴘʟᴀʏ"
-
                 else:
                     await self.stop(chat_id)
-
                     if skip_user:
                         await app.send_message(
                             chat_id,
                             _lang["play_skipped"].format(skip_user),
                         )
-
                     return await app.send_message(
                         chat_id,
                         _lang["queue_finished"],
                     )
-
             else:
                 await self.stop(chat_id)
-
                 if skip_user:
                     await app.send_message(
                         chat_id,
                         _lang["play_skipped"].format(skip_user),
                     )
-
                 return await app.send_message(
                     chat_id,
                     _lang["queue_finished"],
                 )
-
         else:
             media = queue.get_next(chat_id)
-
             if not media:
                 await self.stop(chat_id)
-
                 return await app.send_message(
                     chat_id,
                     _lang["queue_finished"],
@@ -427,14 +433,9 @@ class TgCall(PyTgCalls):
 
         if media.message_id:
             try:
-                msg = await app.get_messages(
-                    chat_id,
-                    media.message_id,
-                )
-
+                msg = await app.get_messages(chat_id, media.message_id)
                 if not msg or not msg.id or msg.empty:
                     msg = None
-
                 else:
                     try:
                         text = (
@@ -444,12 +445,9 @@ class TgCall(PyTgCalls):
                             if skip_user
                             else _lang["play_next"]
                         )
-
                         await msg.edit_text(text)
-
                     except Exception:
                         pass
-
             except Exception:
                 msg = None
 
@@ -461,14 +459,11 @@ class TgCall(PyTgCalls):
                 if skip_user
                 else _lang["play_next"]
             )
-
             msg = await app.send_message(
                 chat_id=chat_id,
                 text=text,
             )
 
-        # Audio tracks are streamed directly by play_media().
-        # Only videos retain the existing download behavior.
         if not media.file_path and media.video:
             media.file_path = await yt.download(
                 media.id,
@@ -482,32 +477,19 @@ class TgCall(PyTgCalls):
                     )
                 except Exception:
                     pass
-
                 return await self.play_next(chat_id)
 
         media.message_id = msg.id
-
-        await self.play_media(
-            chat_id,
-            msg,
-            media,
-        )
+        await self.play_media(chat_id, msg, media)
 
     async def ping(self) -> float:
         pings = [client.ping for client in self.clients]
-
         if not pings:
             return 0.0
-
         return round(sum(pings) / len(pings), 2)
 
-    async def _delete_msg(
-        self,
-        message: Message,
-        delay: int = 2,
-    ):
+    async def _delete_msg(self, message: Message, delay: int = 2):
         await asyncio.sleep(delay)
-
         try:
             await message.delete()
         except Exception:
@@ -521,9 +503,7 @@ class TgCall(PyTgCalls):
                     return
 
                 try:
-                    user = await app.get_users(
-                        update.participant.user_id
-                    )
+                    user = await app.get_users(update.participant.user_id)
                 except Exception:
                     return
 
@@ -534,26 +514,17 @@ class TgCall(PyTgCalls):
                         user.mention,
                         user.id,
                     )
-
                 elif update.action == types.GroupCallParticipant.Action.LEFT:
                     text = _lang["vclog_left"].format(
                         user.mention,
                         user.id,
                     )
-
                 else:
                     return
 
                 try:
-                    sent = await app.send_message(
-                        update.chat_id,
-                        text,
-                    )
-
-                    asyncio.create_task(
-                        self._delete_msg(sent)
-                    )
-
+                    sent = await app.send_message(update.chat_id, text)
+                    asyncio.create_task(self._delete_msg(sent))
                 except Exception:
                     pass
 
@@ -561,7 +532,6 @@ class TgCall(PyTgCalls):
                 if update.stream_type == types.StreamEnded.Type.AUDIO:
                     if self.restarting.get(update.chat_id):
                         return
-
                     await self.play_next(update.chat_id)
 
             elif isinstance(update, types.ChatUpdate):
@@ -580,10 +550,8 @@ class TgCall(PyTgCalls):
                 ub,
                 cache_duration=100,
             )
-
             await client.start()
             self.clients.append(client)
-
             await self.decorators(client)
 
         logger.info("PyTgCalls client(s) started.")

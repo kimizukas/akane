@@ -530,6 +530,12 @@ class YouTubeAPI:
             )
             return None
 
+
+
+
+
+
+     
     async def search_multi(
         self,
         query: str,
@@ -542,7 +548,6 @@ class YouTubeAPI:
         if not query:
             return []
 
-        # Direct video ID/URL.
         if extract_video_id(query):
             track = await self.search(
                 query,
@@ -551,7 +556,6 @@ class YouTubeAPI:
             )
             return [track] if track else []
 
-        # Fast asynchronous search for Mini App and autoplay.
         try:
             return await _fast_search_tracks(
                 query=query,
@@ -560,13 +564,12 @@ class YouTubeAPI:
                 limit=limit,
             )
 
-        except Exception as exc:
-            logger.warning(
-                "Fast YouTube multi-search failed: %s",
-                type(exc).__name__,
+        except Exception:
+            logger.exception(
+                "Fast YouTube multi-search failed for query: %s",
+                query,
             )
             return []
-
 
 
 

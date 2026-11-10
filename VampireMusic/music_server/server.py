@@ -240,6 +240,8 @@ async def search_tracks(request):
         )
 
 
+
+
 async def stream_track(request):
     video_id = request.match_info["video_id"]
     token = request.query.get("token", "")
@@ -257,6 +259,8 @@ async def stream_track(request):
         sock_read=60,
     )
 
+    cdn_forbidden = False
+
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             for attempt in range(2):
@@ -266,11 +270,10 @@ async def stream_track(request):
                 )
 
                 if not stream or not stream.get("url"):
-                    raise web.HTTPBadGateway(
-                        text="Unable to resolve audio source."
-                    )
+                    break
 
                 headers = dict(stream.get("headers") or {})
+
                 if range_header:
                     headers["Range"] = range_header
 
@@ -280,11 +283,14 @@ async def stream_track(request):
                     allow_redirects=True,
                 ) as upstream:
 
-                    if upstream.status == 403 and attempt == 0:
+                    if upstream.status == 403:
                         logger.warning(
-                            "Audio CDN returned HTTP 403 for %s; refreshing URL.",
+                            "Audio CDN returned HTTP 403 for %s "
+                            "(attempt %s).",
                             video_id,
+                            attempt + 1,
                         )
+                        cdn_forbidden = True
                         continue
 
                     if upstream.status >= 400:
@@ -300,7 +306,9 @@ async def stream_track(request):
                     response_headers = {
                         "Content-Type": upstream.headers.get(
                             "Content-Type",
-                            _audio_content_type(stream.get("ext", "webm")),
+                            _audio_content_type(
+                                stream.get("ext", "webm")
+                            ),
                         ),
                         "Cache-Control": "private, no-store",
                         "X-Content-Type-Options": "nosniff",
@@ -324,25 +332,80 @@ async def stream_track(request):
                         status=upstream.status,
                         headers=response_headers,
                     )
+
                     await response.prepare(request)
 
-                    async for chunk in upstream.content.iter_chunked(64 * 1024):
+                    async for chunk in upstream.content.iter_chunked(
+                        64 * 1024
+                    ):
                         await response.write(chunk)
 
                     await response.write_eof()
                     return response
 
-        raise web.HTTPBadGateway(text="Audio source unavailable.")
+        # Temporary fallback: use a downloaded local audio file
+        # only when YouTube CDN rejects both stream URLs with HTTP 403.
+        if cdn_forbidden:
+            logger.warning(
+                "Using temporary download fallback for %s.",
+                video_id,
+            )
+
+            filepath = await yt.download(
+                f"https://www.youtube.com/watch?v={video_id}",
+                video=False,
+            )
+
+            if not filepath:
+                raise web.HTTPBadGateway(
+                    text="Audio download fallback failed."
+                )
+
+            audio_path = Path(filepath).resolve()
+            download_dir = DOWNLOAD_DIR.resolve()
+
+            if (
+                not audio_path.is_file()
+                or not audio_path.is_relative_to(download_dir)
+            ):
+                raise web.HTTPBadGateway(
+                    text="Invalid downloaded audio file."
+                )
+
+            return web.FileResponse(
+                audio_path,
+                headers={
+                    "Cache-Control": "private, no-store",
+                    "X-Content-Type-Options": "nosniff",
+                    "Accept-Ranges": "bytes",
+                },
+            )
+
+        raise web.HTTPBadGateway(
+            text="Unable to resolve audio source."
+        )
 
     except web.HTTPException:
         raise
-    except (ConnectionResetError, asyncio.CancelledError):
+    except asyncio.CancelledError:
+        raise
+    except (ConnectionResetError, aiohttp.ClientConnectionError):
+        logger.debug(
+            "Mini App audio client disconnected: %s",
+            video_id,
+        )
         raise
     except Exception:
-        logger.exception("Mini App direct stream failed.")
+        logger.exception(
+            "Mini App direct stream failed for %s.",
+            video_id,
+        )
         raise web.HTTPBadGateway(
             text="Unable to start audio stream."
         )
+
+
+
 
 
 async def check_group_membership(request):

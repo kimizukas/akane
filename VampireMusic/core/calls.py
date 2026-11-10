@@ -1,6 +1,9 @@
 
 import asyncio
 import time
+import hashlib
+import hmac
+import os
 from collections import defaultdict
 
 from ntgcalls import (
@@ -15,9 +18,7 @@ from pytgcalls.pytgcalls_session import PyTgCallsSession
 
 from VampireMusic import app, config, db, lang, logger, queue, thumb, userbot, yt
 from VampireMusic.helpers import Media, Track, buttons
-import hashlib
-import hmac
-import os
+
 
 def _internal_stream_url(video_id: str) -> str:
     user_id = int(app.id)
@@ -38,8 +39,6 @@ def _internal_stream_url(video_id: str) -> str:
         f"http://127.0.0.1:{port}/api/stream/"
         f"{video_id}?token={token}"
     )
-
-
 
 
 class TgCall(PyTgCalls):
@@ -94,7 +93,6 @@ class TgCall(PyTgCalls):
         force_refresh: bool = False,
     ):
         if isinstance(media, Track) and not media.video:
-
             # Existing downloaded local files stay unchanged.
             if (
                 media.file_path
@@ -113,7 +111,7 @@ class TgCall(PyTgCalls):
             if not stream or not stream.get("url"):
                 return None, None
 
-            # Voice chat uses the same working proxy as the Mini App.
+            # Voice chat uses the same proxy as the Mini App.
             source = _internal_stream_url(str(media.id))
 
             media.file_path = source
@@ -125,9 +123,6 @@ class TgCall(PyTgCalls):
             return media.file_path, None
 
         return None, None
-
-
-
 
     def _build_media_stream(
         self,
@@ -144,7 +139,9 @@ class TgCall(PyTgCalls):
         if not media.video:
             ffmpeg_parts.append("-vn")
 
-        if isinstance(source, str) and source.startswith(("http://", "https://")):
+        if isinstance(source, str) and source.startswith(
+            ("http://", "https://")
+        ):
             allowed_headers = (
                 "User-Agent",
                 "Referer",
@@ -162,7 +159,6 @@ class TgCall(PyTgCalls):
                     header_lines.append(f"{name}: {value}")
 
             if header_lines:
-                # Real CRLF line endings are required by FFmpeg.
                 header_value = "\r\n".join(header_lines) + "\r\n"
                 ffmpeg_parts.extend([
                     "-headers",
@@ -191,74 +187,36 @@ class TgCall(PyTgCalls):
             ffmpeg_parameters=ffmpeg_params,
         )
 
-
-
-
-
-
     async def play_media(
-    self,
-    chat_id: int,
-    message: Message,
-    media: Media | Track,
-    seek_time: int = 0,
-) -> None:
-    self.restarting[chat_id] += 1
-
-    try:
-        if await db.get_call(chat_id):
-            await asyncio.sleep(0.2)
-
-        # Prepare playback requirements concurrently.
-        client, _lang, _thumb_mode, _autoplay, playback_source = (
-            await asyncio.gather(
-                db.get_assistant(chat_id),
-                lang.get_lang(chat_id),
-                db.get_thumb_mode(chat_id),
-                db.get_autoplay(chat_id),
-                self._get_playback_source(media, seek_time),
-            )
-        )
-
-        source, stream_headers = playback_source
-
-        if not source:
-            await message.edit_text(
-                _lang["error_no_file"].format(config.SUPPORT_CHAT)
-            )
-            return await self.play_next(chat_id)
-
-        stream = self._build_media_stream(
-            media,
-            source,
-            stream_headers,
-            seek_time,
-        )
+        self,
+        chat_id: int,
+        message: Message,
+        media: Media | Track,
+        seek_time: int = 0,
+    ) -> None:
+        self.restarting[chat_id] += 1
 
         try:
-            await client.play(chat_id, stream)
+            if await db.get_call(chat_id):
+                await asyncio.sleep(0.2)
 
-        except (
-            exceptions.NoAudioSourceFound,
-            asyncio.TimeoutError,
-            TimeoutError,
-        ):
-            if not isinstance(media, Track) or media.video:
-                raise
-
-            logger.warning(
-                "Playback source failed in chat %s; refreshing YouTube URL.",
-                chat_id,
+            client, _lang, _thumb_mode, _autoplay, playback_source = (
+                await asyncio.gather(
+                    db.get_assistant(chat_id),
+                    lang.get_lang(chat_id),
+                    db.get_thumb_mode(chat_id),
+                    db.get_autoplay(chat_id),
+                    self._get_playback_source(media, seek_time),
+                )
             )
 
-            source, stream_headers = await self._get_playback_source(
-                media,
-                seek_time,
-                force_refresh=True,
-            )
+            source, stream_headers = playback_source
 
             if not source:
-                raise exceptions.NoAudioSourceFound(str(media.id))
+                await message.edit_text(
+                    _lang["error_no_file"].format(config.SUPPORT_CHAT)
+                )
+                return await self.play_next(chat_id)
 
             stream = self._build_media_stream(
                 media,
@@ -267,124 +225,152 @@ class TgCall(PyTgCalls):
                 seek_time,
             )
 
-            await client.play(chat_id, stream)
+            try:
+                await client.play(chat_id, stream)
 
-        # Mark playback immediately after successful start.
-        media.played_at = time.time()
+            except (
+                exceptions.NoAudioSourceFound,
+                asyncio.TimeoutError,
+                TimeoutError,
+            ):
+                if not isinstance(media, Track) or media.video:
+                    raise
 
-        if seek_time:
-            media.time = seek_time
-        else:
-            media.time = 1
-            await db.add_call(chat_id)
-
-            # Thumbnail generation happens only after music starts.
-            _thumb = (
-                (
-                    await thumb.generate(media)
-                    if isinstance(media, Track)
-                    else config.DEFAULT_THUMB
+                logger.warning(
+                    "Playback source failed in chat %s; refreshing YouTube URL.",
+                    chat_id,
                 )
-                if config.THUMB_GEN and _thumb_mode
-                else None
-            )
 
-            text = _lang["play_media"].format(
-                media.url,
-                media.title,
-                media.duration,
-                media.user,
-            )
+                source, stream_headers = await self._get_playback_source(
+                    media,
+                    seek_time,
+                    force_refresh=True,
+                )
 
-            keyboard = buttons.controls(
+                if not source:
+                    raise exceptions.NoAudioSourceFound(str(media.id))
+
+                stream = self._build_media_stream(
+                    media,
+                    source,
+                    stream_headers,
+                    seek_time,
+                )
+
+                await client.play(chat_id, stream)
+
+            # Mark playback immediately after successful start.
+            media.played_at = time.time()
+
+            if seek_time:
+                media.time = seek_time
+            else:
+                media.time = 1
+                await db.add_call(chat_id)
+
+                # Thumbnail generation happens only after music starts.
+                _thumb = (
+                    (
+                        await thumb.generate(media)
+                        if isinstance(media, Track)
+                        else config.DEFAULT_THUMB
+                    )
+                    if config.THUMB_GEN and _thumb_mode
+                    else None
+                )
+
+                text = _lang["play_media"].format(
+                    media.url,
+                    media.title,
+                    media.duration,
+                    media.user,
+                )
+
+                keyboard = buttons.controls(
+                    chat_id,
+                    lang=_lang,
+                    autoplay=_autoplay,
+                )
+
+                try:
+                    if _thumb:
+                        await message.edit_media(
+                            media=InputMediaPhoto(
+                                media=_thumb,
+                                caption=text,
+                            ),
+                            reply_markup=keyboard,
+                        )
+                    else:
+                        await message.edit_text(
+                            text,
+                            reply_markup=keyboard,
+                        )
+
+                except Exception:
+                    try:
+                        await message.delete()
+                    except Exception:
+                        pass
+
+                    if _thumb:
+                        sent = await app.send_photo(
+                            chat_id=chat_id,
+                            photo=_thumb,
+                            caption=text,
+                            reply_markup=keyboard,
+                        )
+                    else:
+                        sent = await app.send_message(
+                            chat_id=chat_id,
+                            text=text,
+                            reply_markup=keyboard,
+                        )
+
+                    media.message_id = sent.id
+
+        except FileNotFoundError:
+            await message.edit_text(
+                _lang["error_no_file"].format(config.SUPPORT_CHAT)
+            )
+            await self.play_next(chat_id)
+
+        except exceptions.NoActiveGroupCall:
+            await self.stop(chat_id)
+            await message.edit_text(_lang["error_no_call"])
+
+        except exceptions.NoAudioSourceFound:
+            await message.edit_text(_lang["error_no_audio"])
+            await self.play_next(chat_id)
+
+        except (asyncio.TimeoutError, TimeoutError):
+            await message.edit_text(_lang["error_tg_server"])
+            await self.play_next(chat_id)
+
+        except (ConnectionError, ConnectionNotFound, TelegramServerError):
+            await self.stop(chat_id)
+            await message.edit_text(_lang["error_tg_server"])
+
+        except RTMPStreamingUnsupported:
+            await self.stop(chat_id)
+            await message.edit_text(_lang["error_rtmp"])
+
+        except Exception as exc:
+            logger.exception(
+                "Playback failed in chat %s: %s",
                 chat_id,
-                lang=_lang,
-                autoplay=_autoplay,
+                type(exc).__name__,
             )
 
             try:
-                if _thumb:
-                    await message.edit_media(
-                        media=InputMediaPhoto(
-                            media=_thumb,
-                            caption=text,
-                        ),
-                        reply_markup=keyboard,
-                    )
-                else:
-                    await message.edit_text(
-                        text,
-                        reply_markup=keyboard,
-                    )
-
+                await message.edit_text(_lang["error_no_audio"])
             except Exception:
-                try:
-                    await message.delete()
-                except Exception:
-                    pass
+                pass
 
-                if _thumb:
-                    sent = await app.send_photo(
-                        chat_id=chat_id,
-                        photo=_thumb,
-                        caption=text,
-                        reply_markup=keyboard,
-                    )
-                else:
-                    sent = await app.send_message(
-                        chat_id=chat_id,
-                        text=text,
-                        reply_markup=keyboard,
-                    )
+            await self.play_next(chat_id)
 
-                media.message_id = sent.id
-
-    except FileNotFoundError:
-        await message.edit_text(
-            _lang["error_no_file"].format(config.SUPPORT_CHAT)
-        )
-        await self.play_next(chat_id)
-
-    except exceptions.NoActiveGroupCall:
-        await self.stop(chat_id)
-        await message.edit_text(_lang["error_no_call"])
-
-    except exceptions.NoAudioSourceFound:
-        await message.edit_text(_lang["error_no_audio"])
-        await self.play_next(chat_id)
-
-    except (asyncio.TimeoutError, TimeoutError):
-        await message.edit_text(_lang["error_tg_server"])
-        await self.play_next(chat_id)
-
-    except (ConnectionError, ConnectionNotFound, TelegramServerError):
-        await self.stop(chat_id)
-        await message.edit_text(_lang["error_tg_server"])
-
-    except RTMPStreamingUnsupported:
-        await self.stop(chat_id)
-        await message.edit_text(_lang["error_rtmp"])
-
-    except Exception as exc:
-        logger.exception(
-            "Playback failed in chat %s: %s",
-            chat_id,
-            type(exc).__name__,
-        )
-
-        try:
-            await message.edit_text(_lang["error_no_audio"])
-        except Exception:
-            pass
-
-        await self.play_next(chat_id)
-
-    finally:
-        self.restarting[chat_id] -= 1
-
-
-
-
+        finally:
+            self.restarting[chat_id] -= 1
 
     async def play_next(
         self,
@@ -581,5 +567,4 @@ class TgCall(PyTgCalls):
             await client.start()
             self.clients.append(client)
             await self.decorators(client)
-
-        logger.info("PyTgCalls client(s) started.")
+            

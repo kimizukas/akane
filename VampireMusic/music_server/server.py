@@ -6,6 +6,8 @@ import os
 import time
 from pathlib import Path
 from urllib.parse import parse_qsl
+from VampireMusic import app, config, db, yt
+
 
 from aiohttp import web
 
@@ -155,6 +157,146 @@ async def get_me(request):
             "photo_url": user["photo_url"],
         },
     })
+
+
+
+
+def make_stream_token(user_id: int, video_id: str, expires: int) -> str:
+    payload = f"{user_id}:{video_id}:{expires}"
+    secret = config.BOT_TOKEN.encode()
+
+    signature = hmac.new(
+        secret,
+        payload.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+    return f"{expires}.{signature}"
+
+
+def verify_stream_token(
+    user_id: int,
+    video_id: str,
+    token: str,
+) -> bool:
+    try:
+        expires_text, signature = token.split(".", 1)
+        expires = int(expires_text)
+
+        if expires < int(time.time()) or expires > int(time.time()) + 3600:
+            return False
+
+        expected = make_stream_token(user_id, video_id, expires)
+        return hmac.compare_digest(expected, token)
+
+    except (ValueError, TypeError):
+        return False
+
+
+async def search_tracks(request):
+    user = request["telegram_user"]
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {"ok": False, "error": "invalid_json"},
+            status=400,
+        )
+
+    query = str(data.get("query", "")).strip()
+
+    if not query or len(query) > 200:
+        return web.json_response(
+            {"ok": False, "error": "invalid_query"},
+            status=400,
+        )
+
+    try:
+        tracks = await yt.search_multi(
+            query=query,
+            m_id=0,
+            video=False,
+            limit=10,
+        )
+
+        results = []
+
+        for track in tracks:
+            expires = int(time.time()) + 900
+            token = make_stream_token(
+                user["id"],
+                track.id,
+                expires,
+            )
+
+            results.append({
+                "id": track.id,
+                "title": track.title,
+                "artist": track.channel_name,
+                "duration": track.duration,
+                "duration_sec": track.duration_sec,
+                "thumbnail": track.thumbnail,
+                "url": track.url,
+                "stream_url": (
+                    f"/api/stream/{track.id}?token={token}"
+                ),
+            })
+
+        return web.json_response({
+            "ok": True,
+            "results": results,
+        })
+
+    except Exception:
+        logger.exception("Mini App search failed.")
+        return web.json_response(
+            {"ok": False, "error": "search_failed"},
+            status=500,
+        )
+
+
+async def stream_track(request):
+    user = request["telegram_user"]
+    video_id = request.match_info["video_id"]
+    token = request.query.get("token", "")
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+        raise web.HTTPBadRequest(text="Invalid video ID.")
+
+    if not verify_stream_token(user["id"], video_id, token):
+        raise web.HTTPForbidden(text="Invalid or expired stream token.")
+
+    try:
+        file_path = await yt.download(video_id)
+
+        if not file_path:
+            raise web.HTTPNotFound(text="Audio not available.")
+
+        path = Path(file_path).resolve()
+        download_root = DOWNLOAD_DIR.resolve()
+
+        if download_root not in path.parents or not path.is_file():
+            raise web.HTTPNotFound(text="Audio file not found.")
+
+        return web.FileResponse(
+            path,
+            headers={
+                "Content-Type": "audio/mpeg",
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, no-store",
+            },
+        )
+
+    except web.HTTPException:
+        raise
+    except Exception:
+        logger.exception("Mini App stream failed.")
+        raise web.HTTPInternalServerError(text="Unable to stream audio.")
+
+
+
+
 
 
 async def check_group_membership(request):

@@ -377,6 +377,8 @@ def create_app():
     application.router.add_get("/music/", music_page)
 
     application.router.add_get("/api/me", get_me)
+application.router.add_post("/api/search", search_tracks)
+application.router.add_get("/api/stream/{video_id}", stream_track)
     application.router.add_get(
         "/api/groups/{chat_id}/membership",
         check_group_membership,

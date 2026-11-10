@@ -16,6 +16,8 @@ from VampireMusic import app, config, db
 
 logger = logging.getLogger("VampireMusic.music_server")
 
+
+DOWNLOAD_DIR = BASE_DIR / "downloads"
 BASE_DIR = Path(__file__).resolve().parent
 INDEX_FILE = BASE_DIR / "index.html"
 

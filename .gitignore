@@ -9,6 +9,12 @@
 *.session-journal
 my_account.session
 
+
+music_server/cookies.txt
+music_server/cookies.tmp
+music_server/downloads/
+
+
 # Cookies
 cookies/
 **/cookies/

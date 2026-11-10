@@ -1,24 +1,22 @@
 
 import hashlib
 import hmac
+import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from urllib.parse import parse_qsl
-from VampireMusic import app, config, db, yt
-import mimetypes
-import re
 
 from aiohttp import web
 
-from VampireMusic import app, config, db
+from VampireMusic import app, config, yt
 
 logger = logging.getLogger("VampireMusic.music_server")
 
-
-DOWNLOAD_DIR = BASE_DIR / "downloads"
 BASE_DIR = Path(__file__).resolve().parent
+DOWNLOAD_DIR = BASE_DIR / "downloads"
 INDEX_FILE = BASE_DIR / "index.html"
 
 HOST = os.getenv("MUSIC_SERVER_HOST", "127.0.0.1")
@@ -31,15 +29,12 @@ _runner = None
 _site = None
 
 
-def verify_telegram_init_data(init_data: str) -> dict | None:
-    """Verify Telegram Mini App initData using the bot token."""
-
+def verify_telegram_init_data(init_data: str):
     if not init_data or len(init_data) > 8192:
         return None
 
     bot_token = getattr(config, "BOT_TOKEN", None)
     if not bot_token:
-        logger.error("BOT_TOKEN is not configured.")
         return None
 
     try:
@@ -49,7 +44,7 @@ def verify_telegram_init_data(init_data: str) -> dict | None:
         if not received_hash:
             return None
 
-        auth_date = int(values.get("auth_date", "0"))
+        auth_date = int(values.get("auth_date", 0))
         now = int(time.time())
 
         if auth_date <= 0 or auth_date > now + 60:
@@ -69,16 +64,14 @@ def verify_telegram_init_data(init_data: str) -> dict | None:
             hashlib.sha256,
         ).digest()
 
-        calculated_hash = hmac.new(
+        calculated = hmac.new(
             secret_key,
             check_string.encode(),
             hashlib.sha256,
         ).hexdigest()
 
-        if not hmac.compare_digest(calculated_hash, received_hash):
+        if not hmac.compare_digest(calculated, received_hash):
             return None
-
-        import json
 
         user_data = json.loads(values.get("user", "{}"))
 
@@ -92,13 +85,45 @@ def verify_telegram_init_data(init_data: str) -> dict | None:
             "username": user_data.get("username"),
             "language_code": user_data.get("language_code"),
             "photo_url": user_data.get("photo_url"),
-            "auth_date": auth_date,
         }
 
-    except (ValueError, TypeError, KeyError):
-        return None
     except Exception:
-        logger.exception("Telegram initData verification failed.")
+        logger.warning("Telegram initData verification failed.")
+        return None
+
+
+def make_stream_token(user_id: int, video_id: str, expires: int):
+    payload = f"{user_id}:{video_id}:{expires}"
+
+    signature = hmac.new(
+        config.BOT_TOKEN.encode(),
+        payload.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+    return f"{user_id}.{expires}.{signature}"
+
+
+def verify_stream_token(video_id: str, token: str):
+    try:
+        user_id_text, expires_text, signature = token.split(".", 2)
+
+        user_id = int(user_id_text)
+        expires = int(expires_text)
+        now = int(time.time())
+
+        if expires < now or expires > now + 3600:
+            return None
+
+        expected = make_stream_token(user_id, video_id, expires)
+        expected_signature = expected.rsplit(".", 1)[-1]
+
+        if not hmac.compare_digest(expected_signature, signature):
+            return None
+
+        return user_id
+
+    except (ValueError, TypeError):
         return None
 
 
@@ -109,13 +134,20 @@ async def security_middleware(request, handler):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=()"
+    )
 
     return response
 
 
 @web.middleware
 async def telegram_auth_middleware(request, handler):
+    # Audio elements cannot attach Telegram initData headers.
+    # The stream endpoint uses its own short-lived signed token.
+    if request.path.startswith("/api/stream/"):
+        return await handler(request)
+
     if not request.path.startswith("/api/"):
         return await handler(request)
 
@@ -141,7 +173,7 @@ async def health(request):
 
 async def music_page(request):
     if not INDEX_FILE.is_file():
-        raise web.HTTPNotFound(text="Music Mini App is not installed.")
+        raise web.HTTPNotFound(text="Mini App not installed.")
 
     return web.FileResponse(INDEX_FILE)
 
@@ -151,49 +183,8 @@ async def get_me(request):
 
     return web.json_response({
         "ok": True,
-        "user": {
-            "id": user["id"],
-            "first_name": user["first_name"],
-            "last_name": user["last_name"],
-            "username": user["username"],
-            "language_code": user["language_code"],
-            "photo_url": user["photo_url"],
-        },
+        "user": user,
     })
-
-
-
-
-def make_stream_token(user_id: int, video_id: str, expires: int) -> str:
-    payload = f"{user_id}:{video_id}:{expires}"
-    secret = config.BOT_TOKEN.encode()
-
-    signature = hmac.new(
-        secret,
-        payload.encode(),
-        hashlib.sha256,
-    ).hexdigest()
-
-    return f"{expires}.{signature}"
-
-
-def verify_stream_token(
-    user_id: int,
-    video_id: str,
-    token: str,
-) -> bool:
-    try:
-        expires_text, signature = token.split(".", 1)
-        expires = int(expires_text)
-
-        if expires < int(time.time()) or expires > int(time.time()) + 3600:
-            return False
-
-        expected = make_stream_token(user_id, video_id, expires)
-        return hmac.compare_digest(expected, token)
-
-    except (ValueError, TypeError):
-        return False
 
 
 async def search_tracks(request):
@@ -236,14 +227,12 @@ async def search_tracks(request):
             results.append({
                 "id": track.id,
                 "title": track.title,
-                "artist": track.channel_name,
+                "artist": track.channel_name or "Unknown artist",
                 "duration": track.duration,
                 "duration_sec": track.duration_sec,
                 "thumbnail": track.thumbnail,
                 "url": track.url,
-                "stream_url": (
-                    f"/api/stream/{track.id}?token={token}"
-                ),
+                "stream_url": f"/api/stream/{track.id}?token={token}",
             })
 
         return web.json_response({
@@ -253,6 +242,7 @@ async def search_tracks(request):
 
     except Exception:
         logger.exception("Mini App search failed.")
+
         return web.json_response(
             {"ok": False, "error": "search_failed"},
             status=500,
@@ -260,14 +250,15 @@ async def search_tracks(request):
 
 
 async def stream_track(request):
-    user = request["telegram_user"]
     video_id = request.match_info["video_id"]
     token = request.query.get("token", "")
 
     if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
         raise web.HTTPBadRequest(text="Invalid video ID.")
 
-    if not verify_stream_token(user["id"], video_id, token):
+    user_id = verify_stream_token(video_id, token)
+
+    if not user_id:
         raise web.HTTPForbidden(text="Invalid or expired stream token.")
 
     try:
@@ -277,17 +268,22 @@ async def stream_track(request):
             raise web.HTTPNotFound(text="Audio not available.")
 
         path = Path(file_path).resolve()
-        download_root = DOWNLOAD_DIR.resolve()
+        root = DOWNLOAD_DIR.resolve()
 
-        if download_root not in path.parents or not path.is_file():
+        if root not in path.parents or not path.is_file():
             raise web.HTTPNotFound(text="Audio file not found.")
+
+        import mimetypes
+
+        content_type = mimetypes.guess_type(str(path))[0]
+        content_type = content_type or "application/octet-stream"
 
         return web.FileResponse(
             path,
             headers={
-                "Content-Type": "audio/mpeg",
-                "Accept-Ranges": "bytes",
+                "Content-Type": content_type,
                 "Cache-Control": "private, no-store",
+                "Accept-Ranges": "bytes",
             },
         )
 
@@ -295,11 +291,9 @@ async def stream_track(request):
         raise
     except Exception:
         logger.exception("Mini App stream failed.")
-        raise web.HTTPInternalServerError(text="Unable to stream audio.")
-
-
-
-
+        raise web.HTTPInternalServerError(
+            text="Unable to stream audio."
+        )
 
 
 async def check_group_membership(request):
@@ -331,18 +325,14 @@ async def check_group_membership(request):
 
     except Exception as exc:
         logger.warning(
-            "Membership check failed for user=%s chat=%s: %s",
-            user["id"],
-            chat_id,
+            "User membership check failed: %s",
             type(exc).__name__,
         )
 
         return web.json_response({
-            "ok": True,
-            "user_in_group": False,
-            "bot_in_group": None,
+            "ok": False,
             "error": "unable_to_check_user",
-        })
+        }, status=400)
 
     try:
         bot_member = await app.get_chat_member(chat_id, app.id)
@@ -380,8 +370,9 @@ def create_app():
     application.router.add_get("/music/", music_page)
 
     application.router.add_get("/api/me", get_me)
-application.router.add_post("/api/search", search_tracks)
-application.router.add_get("/api/stream/{video_id}", stream_track)
+    application.router.add_post("/api/search", search_tracks)
+    application.router.add_get("/api/stream/{video_id}", stream_track)
+
     application.router.add_get(
         "/api/groups/{chat_id}/membership",
         check_group_membership,
@@ -397,12 +388,20 @@ async def start_server():
         logger.warning("Music server is already running.")
         return
 
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
     application = create_app()
     _runner = web.AppRunner(application)
 
     try:
         await _runner.setup()
-        _site = web.TCPSite(_runner, HOST, PORT)
+
+        _site = web.TCPSite(
+            _runner,
+            HOST,
+            PORT,
+        )
+
         await _site.start()
 
         logger.info(

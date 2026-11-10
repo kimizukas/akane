@@ -44,7 +44,7 @@ async def play_hndlr(
         setattr(sent, "lang", m.lang)
         file = await tg.download(m.reply_to_message, sent)
 
-    elif video and url and (alt := yt.detect_platform(url)):
+    elif video and url and (alt := await yt.detect_platform(url)):
         file = await yt.resolve_video(
             alt[1],
             sent.id,
@@ -64,10 +64,10 @@ async def play_hndlr(
             await sent.edit_text(m.lang["playlist_fetch"])
 
             tracks = await yt.playlist(
-                config.PLAYLIST_LIMIT,
-                mention,
                 url,
-                video,
+                config.PLAYLIST_LIMIT,
+                user_id=mention,
+                video=video,
             )
 
             if not tracks:

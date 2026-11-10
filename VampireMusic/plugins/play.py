@@ -7,6 +7,76 @@ from VampireMusic.helpers import buttons, utils
 from VampireMusic.helpers._play import checkUB
 
 
+
+
+    async def playlist(
+        self,
+        link,
+        limit,
+        user_id=None,
+        videoid: Union[bool, str] = None,
+    ) -> list[Track]:
+
+        # Compatibility with the existing play.py argument order:
+        # playlist(limit, mention, url, video)
+        if isinstance(link, int):
+            link, limit, user_id = user_id, link, limit
+
+        if videoid:
+            link = self.listbase + str(link)
+
+        try:
+            limit = max(1, min(int(limit), 100))
+            options = _ydl_options()
+            options.update({
+                "extract_flat": "in_playlist",
+                "playlistend": limit,
+            })
+
+            def extract_playlist():
+                with yt_dlp.YoutubeDL(options) as ydl:
+                    return ydl.extract_info(link, download=False)
+
+            info = await asyncio.to_thread(extract_playlist)
+            entries = (info or {}).get("entries") or []
+
+            tracks = []
+
+            for entry in entries[:limit]:
+                if not entry:
+                    continue
+
+                video_url = entry.get("url") or entry.get("id")
+                if not video_url:
+                    continue
+
+                try:
+                    detail = await asyncio.to_thread(
+                        _extract_info,
+                        normalize_url(video_url),
+                    )
+                    track = _make_track(detail)
+
+                    if track:
+                        tracks.append(track)
+
+                except Exception:
+                    continue
+
+            return tracks
+
+        except Exception as exc:
+            logger.warning(
+                "YouTube playlist failed: %s",
+                type(exc).__name__,
+            )
+            return []
+
+
+
+
+
+
 def playlist_to_queue(chat_id: int, tracks: list) -> str:
     text = "<blockquote expandable>"
     for track in tracks:

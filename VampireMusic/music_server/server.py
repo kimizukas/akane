@@ -12,16 +12,10 @@ from pathlib import Path
 from urllib.parse import parse_qsl
 
 import aiohttp
-import yt_dlp
 from aiohttp import web
 
 from VampireMusic import app, config, yt
-from VampireMusic.core.youtube import (
-    COOKIES_FILE,
-    YOUTUBE_URL,
-    _make_track,
-    _ydl_options,
-)
+from VampireMusic.core.youtube import VIDEO_ID_RE
 
 logger = logging.getLogger("VampireMusic.music_server")
 
@@ -34,7 +28,6 @@ PORT = int(os.getenv("MUSIC_SERVER_PORT", "8088"))
 
 AUTH_MAX_AGE = 24 * 60 * 60
 MAX_REQUEST_SIZE = 1024 * 1024
-VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 _runner = None
 _site = None
@@ -51,22 +44,18 @@ def verify_telegram_init_data(init_data: str):
     try:
         values = dict(parse_qsl(init_data, keep_blank_values=True))
         received_hash = values.pop("hash", None)
-
         if not received_hash:
             return None
 
         auth_date = int(values.get("auth_date", 0))
         now = int(time.time())
-
         if auth_date <= 0 or auth_date > now + 60:
             return None
-
         if now - auth_date > AUTH_MAX_AGE:
             return None
 
         check_string = "\n".join(
-            f"{key}={value}"
-            for key, value in sorted(values.items())
+            f"{key}={value}" for key, value in sorted(values.items())
         )
 
         secret_key = hmac.new(
@@ -85,7 +74,6 @@ def verify_telegram_init_data(init_data: str):
             return None
 
         user_data = json.loads(values.get("user", "{}"))
-
         if not isinstance(user_data, dict) or not user_data.get("id"):
             return None
 
@@ -97,7 +85,6 @@ def verify_telegram_init_data(init_data: str):
             "language_code": user_data.get("language_code"),
             "photo_url": user_data.get("photo_url"),
         }
-
     except Exception:
         logger.warning("Telegram initData verification failed.")
         return None
@@ -105,20 +92,17 @@ def verify_telegram_init_data(init_data: str):
 
 def make_stream_token(user_id: int, video_id: str, expires: int):
     payload = f"{user_id}:{video_id}:{expires}"
-
     signature = hmac.new(
         config.BOT_TOKEN.encode(),
         payload.encode(),
         hashlib.sha256,
     ).hexdigest()
-
     return f"{user_id}.{expires}.{signature}"
 
 
 def verify_stream_token(video_id: str, token: str):
     try:
         user_id_text, expires_text, signature = token.split(".", 2)
-
         user_id = int(user_id_text)
         expires = int(expires_text)
         now = int(time.time())
@@ -131,94 +115,9 @@ def verify_stream_token(video_id: str, token: str):
 
         if not hmac.compare_digest(expected_signature, signature):
             return None
-
         return user_id
-
     except (ValueError, TypeError):
         return None
-
-
-def _search_without_cookies(query: str, limit: int = 10):
-    """Retry YouTube search without a cookie file."""
-    options = _ydl_options()
-    options.pop("cookiefile", None)
-    options["ignoreerrors"] = False
-
-    with yt_dlp.YoutubeDL(options) as ydl:
-        data = ydl.extract_info(
-            f"ytsearch{limit}:{query}",
-            download=False,
-        )
-
-    tracks = []
-
-    for entry in (data or {}).get("entries") or []:
-        track = _make_track(entry)
-
-        if track:
-            tracks.append(track)
-
-    return tracks
-
-
-def _resolve_audio_stream(video_id: str):
-    """
-    Resolve a direct audio URL.
-
-    Try cookies first when available. If that fails, retry without cookies.
-    Prefer original Opus audio and avoid downloading the complete track.
-    """
-    source = YOUTUBE_URL.format(video_id)
-
-    has_cookies = (
-        COOKIES_FILE.is_file()
-        and COOKIES_FILE.stat().st_size > 0
-    )
-
-    attempts = [True, False] if has_cookies else [False]
-    last_error = None
-
-    for use_cookies in attempts:
-        options = {
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "ignoreerrors": False,
-            "socket_timeout": 20,
-            "retries": 2,
-            "fragment_retries": 2,
-            "format": "bestaudio[acodec=opus]/bestaudio",
-        }
-
-        if use_cookies:
-            options["cookiefile"] = str(COOKIES_FILE)
-
-        try:
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(source, download=False)
-
-            if not info or not info.get("url"):
-                raise RuntimeError("No direct audio URL returned.")
-
-            return {
-                "url": info["url"],
-                "headers": info.get("http_headers") or {},
-                "ext": info.get("ext") or "webm",
-            }
-
-        except Exception as exc:
-            last_error = exc
-            mode = "with cookies" if use_cookies else "without cookies"
-
-            logger.warning(
-                "Audio extraction failed %s: %s",
-                mode,
-                type(exc).__name__,
-            )
-
-    raise RuntimeError(
-        f"Unable to resolve audio stream: {type(last_error).__name__}"
-    )
 
 
 def _audio_content_type(ext: str):
@@ -230,43 +129,35 @@ def _audio_content_type(ext: str):
         "ogg": "audio/ogg",
         "mp3": "audio/mpeg",
     }
-
-    return known.get(ext.lower()) or mimetypes.guess_type(
-        f"audio.{ext}"
-    )[0] or "application/octet-stream"
+    return (
+        known.get((ext or "").lower())
+        or mimetypes.guess_type(f"audio.{ext}")[0]
+        or "application/octet-stream"
+    )
 
 
 @web.middleware
 async def security_middleware(request, handler):
     response = await handler(request)
-
-    # Streaming responses set these headers before prepare().
     if not response.prepared:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
-        response.headers["Referrer-Policy"] = (
-            "strict-origin-when-cross-origin"
-        )
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=()"
         )
-
     return response
 
 
 @web.middleware
 async def telegram_auth_middleware(request, handler):
-    # Audio elements cannot attach Telegram initData headers.
-    # The stream endpoint uses its own short-lived signed token.
     if request.path.startswith("/api/stream/"):
         return await handler(request)
-
     if not request.path.startswith("/api/"):
         return await handler(request)
 
     init_data = request.headers.get("X-Telegram-Init-Data", "")
     user = verify_telegram_init_data(init_data)
-
     if not user:
         return web.json_response(
             {"ok": False, "error": "unauthorized"},
@@ -278,16 +169,12 @@ async def telegram_auth_middleware(request, handler):
 
 
 async def health(request):
-    return web.json_response({
-        "ok": True,
-        "service": "VampireMusic",
-    })
+    return web.json_response({"ok": True, "service": "VampireMusic"})
 
 
 async def music_page(request):
     if not INDEX_FILE.is_file():
         raise web.HTTPNotFound(text="Mini App not installed.")
-
     return web.FileResponse(INDEX_FILE)
 
 
@@ -310,7 +197,6 @@ async def search_tracks(request):
         )
 
     query = str(data.get("query", "")).strip()
-
     if not query or len(query) > 200:
         return web.json_response(
             {"ok": False, "error": "invalid_query"},
@@ -318,7 +204,6 @@ async def search_tracks(request):
         )
 
     try:
-        # First use the existing YouTube search implementation.
         tracks = await yt.search_multi(
             query=query,
             m_id=0,
@@ -326,30 +211,13 @@ async def search_tracks(request):
             limit=10,
         )
 
-        # If cookie-based search fails, retry without cookies.
-        if not tracks:
-            logger.info(
-                "Retrying Mini App search without cookies."
-            )
-            tracks = await asyncio.to_thread(
-                _search_without_cookies,
-                query,
-                10,
-            )
-
         results = []
-
         for track in tracks:
             if not VIDEO_ID_RE.fullmatch(str(track.id)):
                 continue
 
             expires = int(time.time()) + 900
-
-            token = make_stream_token(
-                user["id"],
-                track.id,
-                expires,
-            )
+            token = make_stream_token(user["id"], track.id, expires)
 
             results.append({
                 "id": track.id,
@@ -359,19 +227,13 @@ async def search_tracks(request):
                 "duration_sec": track.duration_sec,
                 "thumbnail": track.thumbnail,
                 "url": track.url,
-                "stream_url": (
-                    f"/api/stream/{track.id}?token={token}"
-                ),
+                "stream_url": f"/api/stream/{track.id}?token={token}",
             })
 
-        return web.json_response({
-            "ok": True,
-            "results": results,
-        })
+        return web.json_response({"ok": True, "results": results})
 
     except Exception:
         logger.exception("Mini App search failed.")
-
         return web.json_response(
             {"ok": False, "error": "search_failed"},
             status=500,
@@ -386,93 +248,91 @@ async def stream_track(request):
         raise web.HTTPBadRequest(text="Invalid video ID.")
 
     if not verify_stream_token(video_id, token):
-        raise web.HTTPForbidden(
-            text="Invalid or expired stream token."
-        )
+        raise web.HTTPForbidden(text="Invalid or expired stream token.")
+
+    range_header = request.headers.get("Range")
+    timeout = aiohttp.ClientTimeout(
+        total=None,
+        connect=15,
+        sock_read=60,
+    )
 
     try:
-        # Resolve a fresh direct URL for every playback request.
-        stream = await asyncio.to_thread(
-            _resolve_audio_stream,
-            video_id,
-        )
-
-        headers = dict(stream["headers"])
-
-        # Forward browser seeking requests to the source.
-        range_header = request.headers.get("Range")
-
-        if range_header:
-            headers["Range"] = range_header
-
-        timeout = aiohttp.ClientTimeout(
-            total=None,
-            connect=15,
-            sock_read=60,
-        )
-
-        async with aiohttp.ClientSession(
-            timeout=timeout,
-            headers={"User-Agent": headers.get(
-                "User-Agent",
-                "Mozilla/5.0",
-            )},
-        ) as session:
-
-            async with session.get(
-                stream["url"],
-                headers=headers,
-                allow_redirects=True,
-            ) as upstream:
-
-                if upstream.status >= 400:
-                    logger.warning(
-                        "Audio CDN returned HTTP %s for %s",
-                        upstream.status,
-                        video_id,
-                    )
-                    raise web.HTTPBadGateway(
-                        text="Audio source unavailable."
-                    )
-
-                response_headers = {
-                    "Content-Type": upstream.headers.get(
-                        "Content-Type",
-                        _audio_content_type(stream["ext"]),
-                    ),
-                    "Cache-Control": "private, no-store",
-                    "X-Content-Type-Options": "nosniff",
-                    "Accept-Ranges": upstream.headers.get(
-                        "Accept-Ranges",
-                        "bytes",
-                    ),
-                }
-
-                for name in (
-                    "Content-Length",
-                    "Content-Range",
-                    "ETag",
-                    "Last-Modified",
-                ):
-                    value = upstream.headers.get(name)
-
-                    if value:
-                        response_headers[name] = value
-
-                response = web.StreamResponse(
-                    status=upstream.status,
-                    headers=response_headers,
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for attempt in range(2):
+                stream = await yt.stream(
+                    video_id,
+                    force_refresh=bool(attempt),
                 )
 
-                await response.prepare(request)
+                if not stream or not stream.get("url"):
+                    raise web.HTTPBadGateway(
+                        text="Unable to resolve audio source."
+                    )
 
-                async for chunk in upstream.content.iter_chunked(
-                    64 * 1024
-                ):
-                    await response.write(chunk)
+                headers = dict(stream.get("headers") or {})
+                if range_header:
+                    headers["Range"] = range_header
 
-                await response.write_eof()
-                return response
+                async with session.get(
+                    stream["url"],
+                    headers=headers,
+                    allow_redirects=True,
+                ) as upstream:
+
+                    if upstream.status == 403 and attempt == 0:
+                        logger.warning(
+                            "Audio CDN returned HTTP 403 for %s; refreshing URL.",
+                            video_id,
+                        )
+                        continue
+
+                    if upstream.status >= 400:
+                        logger.warning(
+                            "Audio CDN returned HTTP %s for %s",
+                            upstream.status,
+                            video_id,
+                        )
+                        raise web.HTTPBadGateway(
+                            text="Audio source unavailable."
+                        )
+
+                    response_headers = {
+                        "Content-Type": upstream.headers.get(
+                            "Content-Type",
+                            _audio_content_type(stream.get("ext", "webm")),
+                        ),
+                        "Cache-Control": "private, no-store",
+                        "X-Content-Type-Options": "nosniff",
+                        "Accept-Ranges": upstream.headers.get(
+                            "Accept-Ranges",
+                            "bytes",
+                        ),
+                    }
+
+                    for name in (
+                        "Content-Length",
+                        "Content-Range",
+                        "ETag",
+                        "Last-Modified",
+                    ):
+                        value = upstream.headers.get(name)
+                        if value:
+                            response_headers[name] = value
+
+                    response = web.StreamResponse(
+                        status=upstream.status,
+                        headers=response_headers,
+                    )
+                    await response.prepare(request)
+
+                    async for chunk in upstream.content.iter_chunked(64 * 1024):
+                        await response.write(chunk)
+
+                    await response.write_eof()
+                    return response
+
+        raise web.HTTPBadGateway(text="Audio source unavailable.")
 
     except web.HTTPException:
         raise
@@ -480,7 +340,6 @@ async def stream_track(request):
         raise
     except Exception:
         logger.exception("Mini App direct stream failed.")
-
         raise web.HTTPBadGateway(
             text="Unable to start audio stream."
         )
@@ -506,34 +365,21 @@ async def check_group_membership(request):
     try:
         member = await app.get_chat_member(chat_id, user["id"])
         user_status = str(member.status).split(".")[-1].lower()
-
-        user_in_group = user_status not in {
-            "left",
-            "kicked",
-            "banned",
-        }
-
+        user_in_group = user_status not in {"left", "kicked", "banned"}
     except Exception as exc:
         logger.warning(
             "User membership check failed: %s",
             type(exc).__name__,
         )
-
-        return web.json_response({
-            "ok": False,
-            "error": "unable_to_check_user",
-        }, status=400)
+        return web.json_response(
+            {"ok": False, "error": "unable_to_check_user"},
+            status=400,
+        )
 
     try:
         bot_member = await app.get_chat_member(chat_id, app.id)
         bot_status = str(bot_member.status).split(".")[-1].lower()
-
-        bot_in_group = bot_status not in {
-            "left",
-            "kicked",
-            "banned",
-        }
-
+        bot_in_group = bot_status not in {"left", "kicked", "banned"}
     except Exception:
         bot_in_group = False
 
@@ -558,14 +404,9 @@ def create_app():
     application.router.add_get("/health", health)
     application.router.add_get("/music", music_page)
     application.router.add_get("/music/", music_page)
-
     application.router.add_get("/api/me", get_me)
     application.router.add_post("/api/search", search_tracks)
-    application.router.add_get(
-        "/api/stream/{video_id}",
-        stream_track,
-    )
-
+    application.router.add_get("/api/stream/{video_id}", stream_track)
     application.router.add_get(
         "/api/groups/{chat_id}/membership",
         check_group_membership,
@@ -582,19 +423,12 @@ async def start_server():
         return
 
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
     application = create_app()
     _runner = web.AppRunner(application)
 
     try:
         await _runner.setup()
-
-        _site = web.TCPSite(
-            _runner,
-            HOST,
-            PORT,
-        )
-
+        _site = web.TCPSite(_runner, HOST, PORT)
         await _site.start()
 
         logger.info(
@@ -602,7 +436,6 @@ async def start_server():
             HOST,
             PORT,
         )
-
     except Exception:
         await _runner.cleanup()
         _runner = None

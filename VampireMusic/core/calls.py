@@ -93,7 +93,7 @@ class TgCall(PyTgCalls):
         force_refresh: bool = False,
     ):
         if isinstance(media, Track) and not media.video:
-            # Existing downloaded local files stay unchanged.
+            # Keep existing downloaded local files unchanged.
             if (
                 media.file_path
                 and not media.file_path.startswith(
@@ -102,7 +102,7 @@ class TgCall(PyTgCalls):
             ):
                 return media.file_path, None
 
-            # Resolve/refresh YouTube URL and populate the shared cache.
+            # Resolve or refresh the YouTube stream.
             stream = await yt.stream(
                 media.id,
                 force_refresh=force_refresh,
@@ -111,7 +111,7 @@ class TgCall(PyTgCalls):
             if not stream or not stream.get("url"):
                 return None, None
 
-            # Voice chat uses the same proxy as the Mini App.
+            # Use the local Mini App proxy for voice-chat playback.
             source = _internal_stream_url(str(media.id))
 
             media.file_path = source
@@ -152,14 +152,17 @@ class TgCall(PyTgCalls):
             )
 
             header_lines = []
+
             for name in allowed_headers:
                 value = (stream_headers or {}).get(name)
+
                 if value:
                     value = str(value).replace("\r", "").replace("\n", "")
                     header_lines.append(f"{name}: {value}")
 
             if header_lines:
                 header_value = "\r\n".join(header_lines) + "\r\n"
+
                 ffmpeg_parts.extend([
                     "-headers",
                     f'"{header_value}"',
@@ -197,13 +200,15 @@ class TgCall(PyTgCalls):
         self.restarting[chat_id] += 1
 
         try:
+            # Initialize language before playback operations.
+            _lang = await lang.get_lang(chat_id)
+
             if await db.get_call(chat_id):
                 await asyncio.sleep(0.2)
 
-            client, _lang, _thumb_mode, _autoplay, playback_source = (
+            client, _thumb_mode, _autoplay, playback_source = (
                 await asyncio.gather(
                     db.get_assistant(chat_id),
-                    lang.get_lang(chat_id),
                     db.get_thumb_mode(chat_id),
                     db.get_autoplay(chat_id),
                     self._get_playback_source(media, seek_time),
@@ -259,16 +264,17 @@ class TgCall(PyTgCalls):
 
                 await client.play(chat_id, stream)
 
-            # Mark playback immediately after successful start.
+            # Playback has successfully started.
             media.played_at = time.time()
 
             if seek_time:
                 media.time = seek_time
+
             else:
                 media.time = 1
                 await db.add_call(chat_id)
 
-                # Thumbnail generation happens only after music starts.
+                # Generate thumbnail only after playback starts.
                 _thumb = (
                     (
                         await thumb.generate(media)
@@ -410,34 +416,44 @@ class TgCall(PyTgCalls):
 
                 if tracks:
                     import random
+
                     media = random.choice(tracks)
                     media.user = "🔄 ᴀᴜᴛᴏᴘʟᴀʏ"
+
                 else:
                     await self.stop(chat_id)
+
                     if skip_user:
                         await app.send_message(
                             chat_id,
                             _lang["play_skipped"].format(skip_user),
                         )
+
                     return await app.send_message(
                         chat_id,
                         _lang["queue_finished"],
                     )
+
             else:
                 await self.stop(chat_id)
+
                 if skip_user:
                     await app.send_message(
                         chat_id,
                         _lang["play_skipped"].format(skip_user),
                     )
+
                 return await app.send_message(
                     chat_id,
                     _lang["queue_finished"],
                 )
+
         else:
             media = queue.get_next(chat_id)
+
             if not media:
                 await self.stop(chat_id)
+
                 return await app.send_message(
                     chat_id,
                     _lang["queue_finished"],
@@ -448,8 +464,10 @@ class TgCall(PyTgCalls):
         if media.message_id:
             try:
                 msg = await app.get_messages(chat_id, media.message_id)
+
                 if not msg or not msg.id or msg.empty:
                     msg = None
+
                 else:
                     try:
                         text = (
@@ -459,9 +477,12 @@ class TgCall(PyTgCalls):
                             if skip_user
                             else _lang["play_next"]
                         )
+
                         await msg.edit_text(text)
+
                     except Exception:
                         pass
+
             except Exception:
                 msg = None
 
@@ -473,6 +494,7 @@ class TgCall(PyTgCalls):
                 if skip_user
                 else _lang["play_next"]
             )
+
             msg = await app.send_message(
                 chat_id=chat_id,
                 text=text,
@@ -491,6 +513,7 @@ class TgCall(PyTgCalls):
                     )
                 except Exception:
                     pass
+
                 return await self.play_next(chat_id)
 
         media.message_id = msg.id
@@ -498,12 +521,19 @@ class TgCall(PyTgCalls):
 
     async def ping(self) -> float:
         pings = [client.ping for client in self.clients]
+
         if not pings:
             return 0.0
+
         return round(sum(pings) / len(pings), 2)
 
-    async def _delete_msg(self, message: Message, delay: int = 2):
+    async def _delete_msg(
+        self,
+        message: Message,
+        delay: int = 2,
+    ):
         await asyncio.sleep(delay)
+
         try:
             await message.delete()
         except Exception:
@@ -528,11 +558,13 @@ class TgCall(PyTgCalls):
                         user.mention,
                         user.id,
                     )
+
                 elif update.action == types.GroupCallParticipant.Action.LEFT:
                     text = _lang["vclog_left"].format(
                         user.mention,
                         user.id,
                     )
+
                 else:
                     return
 
@@ -546,6 +578,7 @@ class TgCall(PyTgCalls):
                 if update.stream_type == types.StreamEnded.Type.AUDIO:
                     if self.restarting.get(update.chat_id):
                         return
+
                     await self.play_next(update.chat_id)
 
             elif isinstance(update, types.ChatUpdate):
@@ -564,7 +597,9 @@ class TgCall(PyTgCalls):
                 ub,
                 cache_duration=100,
             )
+
             await client.start()
             self.clients.append(client)
             await self.decorators(client)
-            
+
+        logger.info("PyTgCalls client(s) started.")

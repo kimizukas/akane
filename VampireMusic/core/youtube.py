@@ -190,6 +190,10 @@ def _resolve_audio_stream(video_id: str):
     }
 
 
+
+
+
+
 def _make_track(
     data: dict,
     message_id: int = 0,
@@ -224,6 +228,117 @@ def _make_track(
         video=video,
         view_count=str(data.get("view_count") or ""),
     )
+
+
+
+async def _fast_search_tracks(
+    query: str,
+    message_id: int = 0,
+    video: bool = False,
+    limit: int = 10,
+) -> list[Track]:
+    limit = max(1, min(int(limit), 20))
+
+    search = VideosSearch(
+        query,
+        limit=limit,
+        language="en",
+        region="IN",
+        timeout=3.5,
+        with_live=False,
+        max_retries=0,
+    )
+
+    try:
+        response = await asyncio.wait_for(
+            search.next(),
+            timeout=4.5,
+        )
+    finally:
+        client = getattr(search, "async_client", None)
+        close = getattr(client, "aclose", None)
+
+        if close is not None:
+            try:
+                await close()
+            except Exception:
+                pass
+
+    entries = (
+        response.get("result", [])
+        if isinstance(response, dict)
+        else []
+    )
+
+    tracks = []
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        video_id = str(entry.get("id") or "").strip()
+        title = str(entry.get("title") or "").strip()
+        duration_sec = time_to_seconds(entry.get("duration"))
+
+        if not VIDEO_ID_RE.fullmatch(video_id):
+            continue
+
+        if not title or duration_sec <= 0:
+            continue
+
+        thumbnails = entry.get("thumbnails") or []
+        thumbnail = None
+
+        if isinstance(thumbnails, list):
+            thumbnail = next(
+                (
+                    item.get("url")
+                    for item in reversed(thumbnails)
+                    if isinstance(item, dict) and item.get("url")
+                ),
+                None,
+            )
+        elif isinstance(thumbnails, dict):
+            thumbnail = thumbnails.get("url")
+
+        channel = entry.get("channel") or {}
+        channel_name = (
+            channel.get("name")
+            if isinstance(channel, dict)
+            else str(channel)
+        )
+
+        view_data = entry.get("viewCount") or {}
+        if isinstance(view_data, dict):
+            view_count = (
+                view_data.get("text")
+                or view_data.get("short")
+                or ""
+            )
+        else:
+            view_count = str(view_data)
+
+        track = _make_track(
+            {
+                "id": video_id,
+                "title": title,
+                "duration": duration_sec,
+                "uploader": channel_name,
+                "webpage_url": (
+                    entry.get("link")
+                    or YOUTUBE_URL.format(video_id)
+                ),
+                "thumbnail": thumbnail,
+                "view_count": view_count,
+            },
+            message_id,
+            video,
+        )
+
+        if track:
+            tracks.append(track)
+
+    return tracks
 
 
 class YouTubeAPI:
@@ -354,17 +469,51 @@ class YouTubeAPI:
 
         return None
 
-    async def search(self, query: str, m_id: int = 0, video: bool = False):
-        try:
-            target = normalize_url(query)
-            if not extract_video_id(target):
-                target = f"ytsearch1:{query}"
+   
 
-            info = await asyncio.to_thread(_extract_info, target)
+    async def search(
+        self,
+        query: str,
+        m_id: int = 0,
+        video: bool = False,
+    ):
+        query = str(query or "").strip()
+
+        if not query:
+            return None
+
+        # Song name: fast asynchronous search.
+        if not extract_video_id(query):
+            try:
+                tracks = await _fast_search_tracks(
+                    query=query,
+                    message_id=m_id,
+                    video=video,
+                    limit=1,
+                )
+                return tracks[0] if tracks else None
+
+            except Exception as exc:
+                logger.warning(
+                    "Fast YouTube search failed: %s",
+                    type(exc).__name__,
+                )
+                return None
+
+        # Direct YouTube URL or video ID.
+        try:
+            info = await asyncio.to_thread(
+                _extract_info,
+                normalize_url(query),
+            )
 
             if info and "entries" in info:
                 info = next(
-                    (entry for entry in (info.get("entries") or []) if entry),
+                    (
+                        entry
+                        for entry in (info.get("entries") or [])
+                        if entry
+                    ),
                     None,
                 )
 
@@ -372,7 +521,7 @@ class YouTubeAPI:
 
         except Exception as exc:
             logger.warning(
-                "YouTube search failed: %s",
+                "YouTube URL extraction failed: %s",
                 type(exc).__name__,
             )
             return None
@@ -384,28 +533,42 @@ class YouTubeAPI:
         video: bool = False,
         limit: int = 10,
     ) -> list[Track]:
-        try:
-            limit = max(1, min(int(limit), 20))
-            info = await asyncio.to_thread(
-                _extract_info,
-                f"ytsearch{limit}:{query}",
+        query = str(query or "").strip()
+
+        if not query:
+            return []
+
+        # Direct video ID/URL.
+        if extract_video_id(query):
+            track = await self.search(
+                query,
+                m_id,
+                video,
             )
+            return [track] if track else []
 
-            tracks = []
-
-            for entry in (info or {}).get("entries") or []:
-                track = _make_track(entry, m_id, video)
-                if track:
-                    tracks.append(track)
-
-            return tracks
+        # Fast asynchronous search for Mini App and autoplay.
+        try:
+            return await _fast_search_tracks(
+                query=query,
+                message_id=m_id,
+                video=video,
+                limit=limit,
+            )
 
         except Exception as exc:
             logger.warning(
-                "YouTube multi-search failed: %s",
+                "Fast YouTube multi-search failed: %s",
                 type(exc).__name__,
             )
             return []
+
+
+
+
+    
+
+    
 
     async def playlist(
         self,

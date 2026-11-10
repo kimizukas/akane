@@ -1,10 +1,22 @@
+
 import asyncio
 import importlib
 import signal
 from contextlib import suppress
 
-from VampireMusic import app, VampireMusic, config, db, logger, stop, thumb, userbot, yt
+from VampireMusic import (
+    app,
+    VampireMusic,
+    config,
+    db,
+    logger,
+    stop,
+    thumb,
+    userbot,
+    yt,
+)
 from VampireMusic.plugins import all_modules
+from VampireMusic.music_server.server import start_server, stop_server
 
 
 async def idle():
@@ -14,34 +26,43 @@ async def idle():
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGABRT):
         with suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop_event.set)
+
     await stop_event.wait()
 
 
 async def main():
     await db.connect()
-    await thumb.start()
-    await app.boot()
-    await userbot.boot()
-    await VampireMusic.boot()
 
-    for module in all_modules:
-        importlib.import_module(f"VampireMusic.plugins.{module}")
-    logger.info(f"Loaded {len(all_modules)} modules.")
+    try:
+        await thumb.start()
+        await app.boot()
+        await userbot.boot()
+        await VampireMusic.boot()
 
-    if config.COOKIES_URL:
-        await yt.save_cookies(config.COOKIES_URL)
+        for module in all_modules:
+            importlib.import_module(f"VampireMusic.plugins.{module}")
 
-    sudoers = await db.get_sudoers()
-    app.sudoers.update(sudoers)
-    app.bl_users.update(await db.get_blacklisted())
-    logger.info(f"Loaded {len(app.sudoers)} sudo users.")
+        logger.info("Loaded %s modules.", len(all_modules))
 
-    await idle()
-    asyncio.create_task(stop())
+        if config.COOKIES_URL:
+            await yt.save_cookies(config.COOKIES_URL)
+
+        sudoers = await db.get_sudoers()
+        app.sudoers.update(sudoers)
+        app.bl_users.update(await db.get_blacklisted())
+
+        logger.info("Loaded %s sudo users.", len(app.sudoers))
+
+        await start_server()
+        await idle()
+
+    finally:
+        await stop_server()
+        await stop()
 
 
 if __name__ == "__main__":
     try:
-        asyncio.get_event_loop().run_until_complete(main())
+        asyncio.run(main())
     except KeyboardInterrupt:
         pass

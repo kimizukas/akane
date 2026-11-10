@@ -42,7 +42,10 @@ async def play_hndlr(
 
     if media:
         setattr(sent, "lang", m.lang)
-        file = await tg.download(m.reply_to_message, sent)
+        file = await tg.download(
+            m.reply_to_message,
+            sent,
+        )
 
     elif video and url and (alt := await yt.detect_platform(url)):
         file = await yt.resolve_video(
@@ -57,7 +60,11 @@ async def play_hndlr(
             )
 
     elif m3u8:
-        file = await tg.process_m3u8(url, sent.id, video)
+        file = await tg.process_m3u8(
+            url,
+            sent.id,
+            video,
+        )
 
     elif url:
         if "playlist" in url:
@@ -166,10 +173,16 @@ async def play_hndlr(
             except Exception:
                 pass
 
-        queue.force_add(m.chat.id, file)
+        queue.force_add(
+            m.chat.id,
+            file,
+        )
 
     else:
-        position = queue.add(m.chat.id, file)
+        position = queue.add(
+            m.chat.id,
+            file,
+        )
 
         if position != 0 or await db.get_call(m.chat.id):
             await sent.edit_text(
@@ -188,7 +201,10 @@ async def play_hndlr(
             )
 
             if tracks:
-                added = playlist_to_queue(m.chat.id, tracks)
+                added = playlist_to_queue(
+                    m.chat.id,
+                    tracks,
+                )
 
                 await app.send_message(
                     chat_id=m.chat.id,
@@ -197,20 +213,29 @@ async def play_hndlr(
 
             return
 
+    # Existing local files are reused.
+    # Audio is no longer downloaded before playback.
     if not file.file_path:
         fname = f"downloads/{file.id}.{'mp4' if video else 'webm'}"
 
-        if Path(fname).exists():
+        if Path(fname).is_file():
             file.file_path = fname
 
-        else:
+        elif video:
             await sent.edit_text(m.lang["play_downloading"])
 
             file.file_path = await yt.download(
                 file.id,
-                video=video,
+                video=True,
             )
 
+            if not file.file_path:
+                return await sent.edit_text(
+                    m.lang["error_no_file"].format(config.SUPPORT_CHAT)
+                )
+
+    # Audio Track with no file_path is resolved and streamed
+    # directly inside VampireMusic.play_media().
     await VampireMusic.play_media(
         chat_id=m.chat.id,
         message=sent,
@@ -220,7 +245,10 @@ async def play_hndlr(
     if not tracks:
         return
 
-    added = playlist_to_queue(m.chat.id, tracks)
+    added = playlist_to_queue(
+        m.chat.id,
+        tracks,
+    )
 
     await app.send_message(
         chat_id=m.chat.id,

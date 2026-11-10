@@ -295,20 +295,36 @@ class YouTubeAPI:
             logger.warning("YouTube multi-search failed: %s", type(exc).__name__)
             return []
 
+
+
+
     async def playlist(
         self,
         link: str,
         limit: int,
         user_id: str = None,
         videoid: Union[bool, str] = None,
+        *,
+        video: bool = False,
     ) -> list[Track]:
-        if videoid:
-            link = self.listbase + str(link)
+        link = str(link or "").strip()
+
+        if not link:
+            return []
+
+        if videoid and not re.search(
+            r"(?:youtube(?:-nocookie)?\.com|youtu\.be)",
+            link,
+            re.I,
+        ):
+            link = self.listbase + link
 
         try:
             limit = max(1, min(int(limit), 100))
+
             options = _ydl_options()
             options.update({
+                "noplaylist": False,
                 "extract_flat": "in_playlist",
                 "playlistend": limit,
             })
@@ -321,11 +337,13 @@ class YouTubeAPI:
             entries = (info or {}).get("entries") or []
 
             tracks = []
+
             for entry in entries[:limit]:
                 if not entry:
                     continue
 
                 video_url = entry.get("url") or entry.get("id")
+
                 if not video_url:
                     continue
 
@@ -333,39 +351,35 @@ class YouTubeAPI:
                     try:
                         detail = await asyncio.to_thread(
                             _extract_info,
-                            normalize_url(video_url),
+                            normalize_url(str(video_url)),
                         )
+
                         entry = detail or entry
+
                     except Exception:
                         continue
 
-                track = _make_track(entry)
+                track = _make_track(
+                    entry,
+                    video=video,
+                )
+
                 if track:
                     tracks.append(track)
 
             return tracks
 
         except Exception as exc:
-            logger.warning("YouTube playlist failed: %s", type(exc).__name__)
+            logger.warning(
+                "YouTube playlist failed: %s",
+                type(exc).__name__,
+            )
             return []
 
-    async def details(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + str(link)
 
-        info = await asyncio.to_thread(_extract_info, normalize_url(link))
-        track = _make_track(info)
 
-        if not track:
-            return None, None, 0, None, None
 
-        return (
-            track.title,
-            track.duration,
-            track.duration_sec,
-            track.thumbnail,
-            track.id,
-        )
+
 
     async def title(self, link: str, videoid: Union[bool, str] = None):
         details = await self.details(link, videoid)

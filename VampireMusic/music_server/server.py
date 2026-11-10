@@ -7,7 +7,8 @@ import time
 from pathlib import Path
 from urllib.parse import parse_qsl
 from VampireMusic import app, config, db, yt
-
+import mimetypes
+import re
 
 from aiohttp import web
 

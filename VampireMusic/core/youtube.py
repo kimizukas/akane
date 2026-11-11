@@ -1,4 +1,3 @@
-
 import asyncio
 import logging
 import os
@@ -33,6 +32,13 @@ VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _STREAM_CACHE = {}
 _STREAM_CACHE_TTL = 90
 _STREAM_CACHE_MAX = 256
+
+# Same video ID must never trigger duplicate yt-dlp extraction.
+_STREAM_LOCKS = {}
+_STREAM_LOCKS_MAX = 512
+
+# Limit simultaneous YouTube extraction across VC and Mini App.
+_STREAM_RESOLVE_SEMAPHORE = asyncio.Semaphore(2)
 
 
 def time_to_seconds(value) -> int:
@@ -122,6 +128,30 @@ def _extract_info(query: str, download: bool = False, video: bool = False):
         return ydl.extract_info(query, download=download)
 
 
+def _get_stream_lock(video_id: str) -> asyncio.Lock:
+    lock = _STREAM_LOCKS.get(video_id)
+
+    if lock is None:
+        lock = asyncio.Lock()
+        _STREAM_LOCKS[video_id] = lock
+
+    # Remove idle locks when the registry grows.
+    if len(_STREAM_LOCKS) > _STREAM_LOCKS_MAX:
+        for key, old_lock in list(_STREAM_LOCKS.items()):
+            if key == video_id:
+                continue
+
+            if not old_lock.locked():
+                _STREAM_LOCKS.pop(key, None)
+
+            if len(_STREAM_LOCKS) <= _STREAM_LOCKS_MAX:
+                break
+
+    return lock
+
+
+
+
 def invalidate_stream_cache(video_id: str) -> None:
     video_id = extract_video_id(video_id)
     if video_id:
@@ -159,30 +189,53 @@ def _cache_stream(data: dict):
         _STREAM_CACHE.pop(next(iter(_STREAM_CACHE)))
 
 
+
 def _resolve_audio_stream(video_id: str):
     source = YOUTUBE_URL.format(video_id)
 
-    # Use the same yt-dlp options as search/download.
-    # This makes the existing cookies.txt available to playback too.
+    # android_vr does not require a GVS PO Token.
+    # Override with YTDLP_PLAYER_CLIENT when another client is needed.
+    clients = [
+        item.strip()
+        for item in os.getenv(
+            "YTDLP_PLAYER_CLIENT",
+            "android_vr",
+        ).split(",")
+        if item.strip()
+    ]
+
     options = _ydl_options()
+
     options.update({
+        "quiet": True,
+        "no_warnings": True,
         "ignoreerrors": False,
         "noplaylist": True,
         "extract_flat": False,
-        "socket_timeout": 20,
-        "retries": 2,
-        "fragment_retries": 2,
-        "format": "bestaudio/best",
+        "socket_timeout": 12,
+        "retries": 1,
+        "fragment_retries": 1,
+        "extractor_retries": 1,
+        "format": "bestaudio[acodec=opus]/bestaudio",
     })
 
-    if "cookiefile" not in options:
-        logger.warning(
-            "YouTube cookies file is missing or empty: %s",
-            COOKIES_FILE,
-        )
+    if clients:
+        options["extractor_args"] = {
+            "youtube": {
+                "player_client": clients,
+            },
+        }
+
+    # android_vr is intentionally used without account cookies.
+    # Other configured clients can use the existing cookies.txt.
+    if clients == ["android_vr"]:
+        options.pop("cookiefile", None)
 
     with yt_dlp.YoutubeDL(options) as ydl:
-        info = ydl.extract_info(source, download=False)
+        info = ydl.extract_info(
+            source,
+            download=False,
+        )
 
     if not info or not info.get("url"):
         raise RuntimeError("Audio URL unavailable")
@@ -192,8 +245,6 @@ def _resolve_audio_stream(video_id: str):
         "headers": info.get("http_headers") or {},
         "ext": info.get("ext") or "webm",
     }
-
-
 
 
 
@@ -352,30 +403,47 @@ class YouTubeAPI:
         self.status = "https://www.youtube.com/oembed?url="
         self.listbase = "https://youtube.com/playlist?list="
 
+
+
     async def stream(self, video_id: str, force_refresh: bool = False):
-        video_id = extract_video_id(video_id)
-        if not video_id:
-            return None
+    video_id = extract_video_id(video_id)
 
-        if force_refresh:
-            invalidate_stream_cache(video_id)
-        else:
-            cached = _STREAM_CACHE.get(video_id)
+    if not video_id:
+        return None
 
-            if cached and cached["expires"] > time.monotonic():
+    request_started = time.monotonic()
+
+    if force_refresh:
+        invalidate_stream_cache(video_id)
+
+    lock = _get_stream_lock(video_id)
+
+    async with lock:
+        now = time.monotonic()
+        cached = _STREAM_CACHE.get(video_id)
+
+        if cached and cached["expires"] > now:
+            # A forced refresh may reuse a result produced by another
+            # refresh request that started while this request was waiting.
+            if (
+                not force_refresh
+                or cached.get("created_at", 0) >= request_started
+            ):
                 return {
                     "url": cached["url"],
                     "headers": cached["headers"],
                     "ext": cached.get("ext") or "webm",
                 }
 
-            invalidate_stream_cache(video_id)
+        if cached:
+            _STREAM_CACHE.pop(video_id, None)
 
         try:
-            data = await asyncio.to_thread(
-                _resolve_audio_stream,
-                video_id,
-            )
+            async with _STREAM_RESOLVE_SEMAPHORE:
+                data = await asyncio.to_thread(
+                    _resolve_audio_stream,
+                    video_id,
+                )
 
             if not data or not data.get("url"):
                 return None
@@ -387,7 +455,14 @@ class YouTubeAPI:
                 "ext": data.get("ext") or "webm",
             })
 
-            return data
+            return {
+                "url": data["url"],
+                "headers": data.get("headers") or {},
+                "ext": data.get("ext") or "webm",
+            }
+
+        except asyncio.CancelledError:
+            raise
 
         except Exception as exc:
             logger.warning(
@@ -396,6 +471,8 @@ class YouTubeAPI:
                 type(exc).__name__,
             )
             return None
+
+
 
     async def save_cookies(self, source: str) -> bool:
         if not source:
@@ -473,7 +550,7 @@ class YouTubeAPI:
 
         return None
 
-   
+
 
     async def search(
         self,
@@ -535,7 +612,7 @@ class YouTubeAPI:
 
 
 
-     
+
     async def search_multi(
         self,
         query: str,
@@ -573,9 +650,9 @@ class YouTubeAPI:
 
 
 
-    
 
-    
+
+
 
     async def playlist(
         self,

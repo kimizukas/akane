@@ -2,175 +2,378 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-  <meta name="theme-color" content="#120e16">
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"
+  >
+  <meta name="theme-color" content="#100d17">
   <meta name="color-scheme" content="dark">
+  <meta name="description" content="Taalune — music, playlists and group listening.">
+
   <title>Taalune — Your music, your space</title>
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="/music/assets/taalune.css?v=2">
-  <script defer src="/music/assets/taalune.js?v=3"></script>
+
+  <link
+    rel="stylesheet"
+    href="/music/assets/taalune.css?v=4"
+  >
+
+  <script
+    defer
+    src="/music/assets/taalune.js?v=4"
+  ></script>
 </head>
+
 <body>
-  <div class="app">
+  <div class="app-shell">
+
     <header class="topbar">
-      <div class="brand">
+      <a class="brand" href="#" data-page="home" aria-label="Taalune home">
         <span class="brand-mark">t</span>
-        <span>Taalune</span>
-      </div>
+
+        <span class="brand-copy">
+          <strong>Taalune</strong>
+          <small>Your music space</small>
+        </span>
+      </a>
 
       <div class="top-actions">
-        <button class="icon-btn" data-action="notifications" aria-label="Notifications">
+        <button
+          class="icon-button"
+          data-action="notifications"
+          aria-label="Notifications"
+          title="Notifications"
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path>
             <path d="M10 21h4"></path>
           </svg>
+          <span id="notificationDot" class="notification-dot" hidden></span>
         </button>
-        <img id="topAvatar" class="avatar" alt="" data-action="profile">
+
+        <button
+          class="avatar-button"
+          data-page="profile"
+          aria-label="Open profile"
+        >
+          <img id="topAvatar" class="avatar" alt="">
+          <span id="topAvatarFallback" class="avatar-fallback">U</span>
+        </button>
       </div>
     </header>
 
-    <main>
-      <section class="page active" id="page-home"></section>
+    <main id="mainContent">
+
+      <section class="page active" id="page-home">
+        <div class="page-loading">
+          <div class="loading-orb"></div>
+          <span>Opening your music space…</span>
+        </div>
+      </section>
+
       <section class="page" id="page-search"></section>
+
       <section class="page" id="page-library"></section>
+
       <section class="page" id="page-groups"></section>
+
       <section class="page" id="page-profile"></section>
+
       <section class="page" id="page-notifications"></section>
+
       <section class="page" id="page-playlist"></section>
+
       <section class="page" id="page-person"></section>
+
     </main>
   </div>
 
-  <div class="mini-player" id="miniPlayer">
-    <img id="miniCover" alt="">
-    <div class="grow mini-player-info" data-action="open-player">
-      <div class="mini-title" id="miniTitle">Nothing playing</div>
-      <div class="mini-sub" id="miniArtist">Choose a song</div>
-      <div class="progress"><span id="miniProgress"></span></div>
-    </div>
+  <div class="mini-player" id="miniPlayer" aria-label="Current song">
+    <button
+      class="mini-player-main"
+      data-action="open-player"
+      aria-label="Open full player"
+    >
+      <img id="miniCover" alt="" class="mini-cover">
+
+      <span class="mini-track-info">
+        <strong id="miniTitle">Nothing playing</strong>
+        <small id="miniArtist">Choose a song</small>
+
+        <span class="mini-progress">
+          <span id="miniProgress"></span>
+        </span>
+      </span>
+    </button>
+
     <div class="mini-controls">
-      <button data-action="toggle-play" id="miniToggle" aria-label="Play or pause">
-        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>
+      <button
+        id="miniToggle"
+        data-action="toggle-play"
+        aria-label="Play or pause"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 5v14l11-7z"></path>
+        </svg>
       </button>
-      <button data-action="next-track" aria-label="Next track">
-        <svg viewBox="0 0 24 24"><path d="M5 5v14l10-7z"></path><path d="M19 5v14"></path></svg>
+
+      <button
+        data-action="next-track"
+        aria-label="Next track"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 5v14l10-7z"></path>
+          <path d="M19 5v14"></path>
+        </svg>
       </button>
     </div>
   </div>
 
   <nav class="bottom-nav" aria-label="Main navigation">
-    <button class="nav-btn active" data-page="home">
-      <svg class="nav-icon" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"></path></svg>
+
+    <button class="nav-button active" data-page="home">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"></path>
+      </svg>
       <span>Home</span>
     </button>
-    <button class="nav-btn" data-page="search">
-      <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="7.2"></circle><path d="m16.2 16.2 4.3 4.3"></path></svg>
+
+    <button class="nav-button" data-page="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="10.8" cy="10.8" r="7.2"></circle>
+        <path d="m16.2 16.2 4.3 4.3"></path>
+      </svg>
       <span>Search</span>
     </button>
-    <button class="nav-btn" data-page="library">
-      <svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"></path><path d="M8 8h8M8 12h8M8 16h5"></path></svg>
+
+    <button class="nav-button" data-page="library">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 4h16v16H4z"></path>
+        <path d="M8 8h8M8 12h8M8 16h5"></path>
+      </svg>
       <span>Library</span>
     </button>
-    <button class="nav-btn" data-page="groups">
-      <svg class="nav-icon" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+
+    <button class="nav-button" data-page="groups">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+        <circle cx="9" cy="7" r="4"></circle>
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+      </svg>
       <span>Groups</span>
     </button>
-    <button class="nav-btn" data-page="profile">
-      <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg>
+
+    <button class="nav-button" data-page="profile">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="8" r="4"></circle>
+        <path d="M4 21a8 8 0 0 1 16 0"></path>
+      </svg>
       <span>Profile</span>
     </button>
+
   </nav>
 
   <div class="overlay" id="sheetOverlay">
-    <div class="sheet">
+    <div
+      class="sheet"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="sheetTitle"
+    >
       <div class="sheet-handle"></div>
-      <div class="sheet-head">
-        <h2 id="sheetTitle">Create playlist</h2>
-        <button class="sheet-close" data-action="close-sheet" aria-label="Close">
-          <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"></path></svg>
+
+      <div class="sheet-header">
+        <div>
+          <div class="eyebrow">Taalune</div>
+          <h2 id="sheetTitle">Details</h2>
+        </div>
+
+        <button
+          class="icon-button"
+          data-action="close-sheet"
+          aria-label="Close"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m6 6 12 12M18 6 6 18"></path>
+          </svg>
         </button>
       </div>
-      <div id="sheetBody"></div>
-      <div class="sheet-actions" id="sheetActions"></div>
+
+      <div id="sheetBody" class="sheet-body"></div>
+
+      <div id="sheetActions" class="sheet-actions"></div>
     </div>
   </div>
 
   <div class="overlay" id="queueOverlay">
-    <div class="sheet">
+    <div
+      class="sheet queue-sheet"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="queueTitle"
+    >
       <div class="sheet-handle"></div>
-      <div class="sheet-head">
+
+      <div class="sheet-header">
         <div>
-          <h2>Queue</h2>
-          <div class="small muted" id="queueCaption"></div>
+          <div class="eyebrow">Personal player</div>
+          <h2 id="queueTitle">Your queue</h2>
+          <p id="queueCaption" class="muted small"></p>
         </div>
-        <button class="sheet-close" data-action="close-queue" aria-label="Close queue">
-          <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"></path></svg>
+
+        <button
+          class="icon-button"
+          data-action="close-queue"
+          aria-label="Close queue"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m6 6 12 12M18 6 6 18"></path>
+          </svg>
         </button>
       </div>
-      <div id="queueItems" class="list"></div>
+
+      <div id="queueItems" class="queue-list"></div>
     </div>
   </div>
 
-  <div class="player-full" id="fullPlayer">
-    <div class="player-top">
-      <button class="icon-btn" data-action="close-player" aria-label="Close player">
-        <svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"></path></svg>
+  <section class="player-full" id="fullPlayer">
+    <div class="player-topbar">
+      <button
+        class="icon-button"
+        data-action="close-player"
+        aria-label="Close player"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m6 15 6-6 6 6"></path>
+        </svg>
       </button>
-      <span>NOW PLAYING</span>
-      <button class="icon-btn" data-action="queue" aria-label="Open queue">
-        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"></path></svg>
+
+      <div class="player-source-label">NOW PLAYING</div>
+
+      <button
+        class="icon-button"
+        data-action="queue"
+        aria-label="Open queue"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h10"></path>
+        </svg>
       </button>
     </div>
 
-    <img class="player-art" id="fullCover" alt="">
+    <div class="player-art-wrap">
+      <div class="player-art-glow"></div>
+      <img id="fullCover" class="player-art" alt="">
+    </div>
 
-    <div class="player-song">
-      <div class="grow">
-        <div class="name" id="fullTitle">Nothing playing</div>
-        <div class="artist" id="fullArtist">Choose a song</div>
+    <div class="player-track-details">
+      <div class="player-track-copy">
+        <strong id="fullTitle">Nothing playing</strong>
+        <span id="fullArtist">Choose a song</span>
       </div>
-      <button class="icon-btn" data-action="like-current" aria-label="Like current track">
-        <svg viewBox="0 0 24 24"><path d="M20.8 8.8c0 5.2-8.8 11-8.8 11s-8.8-5.8-8.8-11A4.8 4.8 0 0 1 12 6.2a4.8 4.8 0 0 1 8.8 2.6Z"></path></svg>
+
+      <button
+        class="icon-button like-current"
+        data-action="like-current"
+        aria-label="Like current song"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20.8 8.8c0 5.2-8.8 11-8.8 11S3.2 14 3.2 8.8A4.8 4.8 0 0 1 12 6.2a4.8 4.8 0 0 1 8.8 2.6Z"></path>
+        </svg>
       </button>
     </div>
 
     <div class="player-progress">
-      <input id="seek" type="range" min="0" max="1000" value="0">
+      <input
+        id="seek"
+        type="range"
+        min="0"
+        max="1000"
+        value="0"
+        aria-label="Seek song"
+      >
+
       <div class="time-row">
         <span id="elapsed">0:00</span>
-        <span id="remaining">-0:00</span>
+        <span id="remaining">--:--</span>
       </div>
     </div>
 
-    <div class="transport">
-      <button data-action="shuffle" id="shuffleButton" aria-label="Shuffle">
-        <svg viewBox="0 0 24 24"><path d="m16 3 4 4-4 4M4 17l5-5 3-3 4-3h4M16 17l4 4-4 4M4 7l5 5 3 3"></path></svg>
+    <div class="player-transport">
+
+      <button
+        id="shuffleButton"
+        data-action="shuffle"
+        aria-label="Shuffle"
+        title="Shuffle"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m16 3 4 4-4 4M4 17l5-5 3-3 4-3h4"></path>
+          <path d="m16 17 4 4-4 4M4 7l5 5 3 3"></path>
+        </svg>
       </button>
-      <button data-action="previous-track" aria-label="Previous track">
-        <svg viewBox="0 0 24 24"><path d="M19 5v14L9 12zM5 5v14"></path></svg>
+
+      <button
+        data-action="previous-track"
+        aria-label="Previous track"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M19 5v14L9 12zM5 5v14"></path>
+        </svg>
       </button>
-      <button class="main-play" data-action="toggle-play" id="fullToggle" aria-label="Play or pause">
-        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>
+
+      <button
+        id="fullToggle"
+        class="main-play-button"
+        data-action="toggle-play"
+        aria-label="Play or pause"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 5v14l11-7z"></path>
+        </svg>
       </button>
-      <button data-action="next-track" aria-label="Next track">
-        <svg viewBox="0 0 24 24"><path d="M5 5v14l10-7zM19 5v14"></path></svg>
+
+      <button
+        data-action="next-track"
+        aria-label="Next track"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 5v14l10-7zM19 5v14"></path>
+        </svg>
       </button>
-      <button data-action="repeat" id="repeatButton" aria-label="Repeat">
-        <svg viewBox="0 0 24 24"><path d="m17 1 4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+
+      <button
+        id="repeatButton"
+        data-action="repeat"
+        aria-label="Repeat off"
+        title="Repeat"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m17 1 4 4-4 4M3 11V9a4 4 0 0 1 4-4h14"></path>
+          <path d="m7 23-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"></path>
+        </svg>
       </button>
+
     </div>
 
     <div class="player-bottom">
       <span id="playerSource">Personal listening</span>
-      <button class="secondary" data-action="queue">
+
+      <button class="secondary-button" data-action="queue">
         Queue
-        <svg class="inline-icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"></path></svg>
       </button>
     </div>
-  </div>
+  </section>
 
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div
+    id="toast"
+    class="toast"
+    role="status"
+    aria-live="polite"
+  ></div>
+
   <audio id="audio" preload="none"></audio>
 </body>
 </html>

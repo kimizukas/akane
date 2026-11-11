@@ -363,8 +363,6 @@ class GroupAPI:
             if isinstance(context, asyncio.CancelledError):
                 raise context
             if isinstance(context, BaseException):
-                # A group is intentionally omitted when the requester is
-                # not a member (unless they are configured global staff).
                 continue
             try:
                 groups.append(await self._group_payload(context))
@@ -520,8 +518,6 @@ class GroupAPI:
         context = await self._context(request, require_control=False)
         chat_id = context["chat_id"]
 
-        # Load the in-memory chat list before checking it, so an existing
-        # Mongo record is not inserted into the collection a second time.
         try:
             saved_chat_ids = await db.get_chats()
             if chat_id not in saved_chat_ids:

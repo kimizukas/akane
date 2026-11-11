@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#101112">
+<title>Taalune — Your music, your space</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{color-scheme:dark;--bg:#101112;--surface:#191b1d;--surface2:#222527;--surface3:#2b2f31;--text:#f5f6f6;--muted:#a4aaac;--line:#303537;--accent:#28cf83;--danger:#ef6464;--radius:18px;--safe-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}body{padding-bottom:calc(150px + var(--safe-bottom));-webkit-tap-highlight-color:transparent}button,input,textarea,select{font:inherit}button{border:0;color:inherit;cursor:pointer}button:disabled{opacity:.45;cursor:default}.app{max-width:760px;margin:0 auto;padding:0 18px}.topbar{height:68px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:rgba(16,17,18,.94);backdrop-filter:blur(18px);z-index:10;margin:0 -18px;padding:0 18px}.brand{display:flex;align-items:center;gap:11px;font-size:22px;font-weight:780;letter-spacing:-.8px}.brand-mark{width:34px;height:34px;background:var(--accent);color:#0c1711;border-radius:11px;display:grid;place-items:center;font-size:19px;font-weight:900}.top-actions{display:flex;align-items:center;gap:8px}.icon-btn{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;background:transparent;color:var(--text);font-size:20px}.icon-btn:active,.pill:active,.track-action:active{background:var(--surface3)}.avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;background:var(--surface3)}.page{display:none;padding-top:16px}.page.active{display:block}.eyebrow{color:var(--muted);font-size:12px;letter-spacing:1.3px;text-transform:uppercase;font-weight:700}.page-title{font-size:29px;letter-spacing:-1.1px;line-height:1.12;margin:7px 0 18px;font-weight:780}.section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:28px 0 13px}.section-head h2{margin:0;font-size:18px;letter-spacing:-.35px}.section-head button{background:none;color:var(--muted);font-size:13px}.muted{color:var(--muted)}.small{font-size:12px}.row{display:flex;align-items:center;gap:12px}.grow{flex:1;min-width:0}.pill-row{display:flex;gap:8px;overflow:auto;padding:2px 0 8px;scrollbar-width:none}.pill{white-space:nowrap;border-radius:999px;padding:10px 15px;background:var(--surface2);color:var(--text);font-size:13px}.pill.active{background:var(--text);color:#111}.primary{background:var(--accent);color:#07160e;font-weight:760;border-radius:999px;padding:12px 17px}.secondary{background:var(--surface3);border-radius:999px;padding:11px 15px;font-weight:650}.ghost{background:transparent;color:var(--muted);padding:10px}.danger{background:rgba(239,100,100,.13);color:var(--danger);border-radius:999px;padding:10px 14px}.searchbar{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:15px;padding:0 14px;margin:12px 0 14px}.searchbar input{width:100%;height:49px;background:transparent;border:0;outline:0;color:var(--text);font-size:15px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.playlist-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:11px;min-width:0}.cover{width:100%;aspect-ratio:1;object-fit:cover;border-radius:11px;background:var(--surface3);display:block}.cover-placeholder{display:grid;place-items:center;background:linear-gradient(145deg,#252a2b,#17191a);font-size:48px;color:var(--muted)}.card-title{font-weight:700;font-size:14px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;margin-top:10px}.card-meta{font-size:12px;color:var(--muted);margin-top:4px}.list{display:flex;flex-direction:column;gap:7px}.track-row{display:flex;align-items:center;gap:11px;padding:9px;border-radius:13px;background:var(--surface);border:1px solid transparent;min-width:0}.track-row.dragging{opacity:.4}.track-row.drag-over{border-color:var(--accent)}.track-cover{width:54px;height:54px;object-fit:cover;border-radius:9px;background:var(--surface3);flex-shrink:0}.track-title{font-size:14px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track-sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}.track-actions{display:flex;align-items:center;gap:2px}.track-action{width:36px;height:36px;border-radius:50%;background:transparent;color:var(--muted);font-size:17px}.play-circle{width:42px;height:42px;border-radius:50%;background:var(--accent);color:#06150d;font-size:16px;font-weight:800;flex-shrink:0}.person-row{display:flex;align-items:center;gap:12px;padding:11px 2px;border-bottom:1px solid var(--line)}.person-avatar{width:48px;height:48px;border-radius:50%;object-fit:cover;background:var(--surface3)}.empty{padding:38px 20px;text-align:center;color:var(--muted);background:var(--surface);border:1px dashed var(--line);border-radius:16px;font-size:14px}.field{display:flex;flex-direction:column;gap:7px;margin:12px 0}.field label{font-size:12px;color:var(--muted);font-weight:650}.field input,.field textarea,.field select{width:100%;border:1px solid var(--line);background:var(--surface2);color:var(--text);border-radius:12px;padding:13px;outline:none}.field textarea{min-height:85px;resize:vertical}.field input:focus,.field textarea:focus{border-color:var(--accent)}.bottom-nav{position:fixed;z-index:20;left:0;right:0;bottom:0;padding:9px 12px calc(9px + var(--safe-bottom));background:rgba(20,22,23,.96);backdrop-filter:blur(20px);border-top:1px solid var(--line);display:flex;justify-content:space-around}.nav-btn{background:transparent;color:var(--muted);display:flex;flex-direction:column;gap:4px;align-items:center;min-width:58px;font-size:10px}.nav-icon{font-size:21px;line-height:22px}.nav-btn.active{color:var(--accent)}.mini-player{position:fixed;z-index:19;bottom:calc(69px + var(--safe-bottom));left:10px;right:10px;max-width:740px;margin:auto;background:#242728;border:1px solid #3b4142;border-radius:14px;padding:9px 11px;display:none;align-items:center;gap:10px;box-shadow:0 8px 30px #0007}.mini-player.visible{display:flex}.mini-player img{width:43px;height:43px;object-fit:cover;border-radius:8px;background:var(--surface3)}.mini-title{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mini-sub{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}.mini-controls{display:flex;gap:2px}.mini-controls button{width:38px;height:38px;background:transparent;border-radius:50%;font-size:17px}.progress{width:100%;height:3px;background:#555;border-radius:5px;overflow:hidden;margin-top:8px}.progress>span{display:block;height:100%;width:0;background:var(--accent)}.overlay{position:fixed;z-index:40;inset:0;background:#0009;display:none;align-items:flex-end;justify-content:center}.overlay.open{display:flex}.sheet{width:100%;max-width:760px;max-height:90dvh;overflow:auto;background:#1c1f20;border:1px solid #353b3d;border-radius:23px 23px 0 0;padding:19px 18px calc(22px + var(--safe-bottom));box-shadow:0 -12px 50px #0008}.sheet-handle{width:38px;height:4px;border-radius:8px;background:#6b7072;margin:0 auto 17px}.sheet-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}.sheet-head h2{margin:0;font-size:20px}.sheet-close{background:var(--surface3);border-radius:50%;width:32px;height:32px}.sheet-actions{display:flex;gap:9px;justify-content:flex-end;margin-top:18px}.toast{position:fixed;z-index:60;bottom:calc(135px + var(--safe-bottom));left:18px;right:18px;max-width:500px;margin:auto;padding:13px 16px;border-radius:13px;background:#eef2ef;color:#111;font-size:13px;font-weight:650;box-shadow:0 8px 28px #0008;display:none}.toast.show{display:block}.detail-head{display:flex;gap:16px;align-items:flex-end;margin:15px 0 20px}.detail-cover{width:130px;height:130px;object-fit:cover;border-radius:13px;background:var(--surface3);flex-shrink:0}.detail-name{font-size:24px;line-height:1.08;font-weight:780;letter-spacing:-.7px}.detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.track-grip{color:#6d7476;touch-action:none;cursor:grab;padding:5px}.notification{padding:13px;border-bottom:1px solid var(--line);display:flex;gap:11px}.notification.unread{background:#1a2420}.notification p{margin:0;font-size:13px;line-height:1.4}.notification-actions{display:flex;gap:7px;margin-top:9px}.profile-head{text-align:center;padding:18px 0}.profile-big-avatar{width:88px;height:88px;border-radius:50%;object-fit:cover;background:var(--surface3);margin-bottom:12px}.stat-row{display:flex;justify-content:center;gap:30px;margin:15px 0}.stat strong{display:block;font-size:18px}.stat span{font-size:11px;color:var(--muted)}.player-full{position:fixed;z-index:35;inset:0;background:#111415;display:none;overflow:auto;padding:calc(18px + env(safe-area-inset-top)) 20px calc(26px + var(--safe-bottom));flex-direction:column}.player-full.open{display:flex}.player-top{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:13px}.player-art{width:min(84vw,440px);aspect-ratio:1;object-fit:cover;border-radius:17px;margin:34px auto 24px;background:var(--surface3);box-shadow:0 16px 45px #0008}.player-song{display:flex;align-items:center;gap:12px}.player-song .name{font-size:21px;font-weight:780;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.player-song .artist{color:var(--muted);margin-top:6px;font-size:14px}.player-progress{margin:26px 0 5px}.player-progress input{width:100%;accent-color:var(--accent)}.time-row{display:flex;justify-content:space-between;color:var(--muted);font-size:11px}.transport{display:flex;align-items:center;justify-content:space-between;margin:20px 0}.transport button{background:transparent;font-size:23px;width:48px;height:48px}.transport .main-play{width:72px;height:72px;border-radius:50%;background:var(--text);color:#111;font-size:26px}.player-bottom{display:flex;justify-content:space-between;align-items:center;margin-top:auto;color:var(--muted)}.hidden{display:none!important}.divider{height:1px;background:var(--line);margin:15px 0}@media(min-width:620px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}.page-title{font-size:34px}.detail-cover{width:170px;height:170px}}
+</style>
+</head>
+<body>
+<div class="app">
+ <header class="topbar">
+  <div class="brand"><span class="brand-mark">t</span><span>Taalune</span></div>
+  <div class="top-actions"><button class="icon-btn" data-action="notifications" aria-label="Notifications">♢</button><img id="topAvatar" class="avatar" alt="" data-action="profile"></div>
+ </header>
+ <main>
+  <section class="page active" id="page-home"></section>
+  <section class="page" id="page-search"></section>
+  <section class="page" id="page-library"></section>
+  <section class="page" id="page-groups"></section>
+  <section class="page" id="page-profile"></section>
+  <section class="page" id="page-notifications"></section>
+  <section class="page" id="page-playlist"></section>
+  <section class="page" id="page-person"></section>
+ </main>
+</div>
+<div class="mini-player" id="miniPlayer">
+ <img id="miniCover" alt=""><div class="grow" data-action="open-player"><div class="mini-title" id="miniTitle">Nothing playing</div><div class="mini-sub" id="miniArtist">Choose a song</div><div class="progress"><span id="miniProgress"></span></div></div>
+ <div class="mini-controls"><button data-action="toggle-play" id="miniToggle">▶</button><button data-action="next-track">»</button></div>
+</div>
+<nav class="bottom-nav">
+ <button class="nav-btn active" data-page="home"><span class="nav-icon">⌂</span><span>Home</span></button>
+ <button class="nav-btn" data-page="search"><span class="nav-icon">⌕</span><span>Search</span></button>
+ <button class="nav-btn" data-page="library"><span class="nav-icon">▤</span><span>Library</span></button>
+ <button class="nav-btn" data-page="groups"><span class="nav-icon">◉</span><span>Groups</span></button>
+ <button class="nav-btn" data-page="profile"><span class="nav-icon">●</span><span>Profile</span></button>
+</nav>
+<div class="overlay" id="sheetOverlay"><div class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><h2 id="sheetTitle">Create playlist</h2><button class="sheet-close" data-action="close-sheet">×</button></div><div id="sheetBody"></div><div class="sheet-actions" id="sheetActions"></div></div></div>
+<div class="overlay" id="queueOverlay"><div class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><h2>Queue</h2><div class="small muted" id="queueCaption"></div></div><button class="sheet-close" data-action="close-queue">×</button></div><div id="queueItems" class="list"></div></div></div>
+<div class="player-full" id="fullPlayer">
+ <div class="player-top"><button class="icon-btn" data-action="close-player">⌄</button><span>NOW PLAYING</span><button class="icon-btn" data-action="queue">☷</button></div>
+ <img class="player-art" id="fullCover" alt="">
+ <div class="player-song"><div class="grow"><div class="name" id="fullTitle">Nothing playing</div><div class="artist" id="fullArtist">Choose a song</div></div><button class="icon-btn" data-action="like-current">♡</button></div>
+ <div class="player-progress"><input id="seek" type="range" min="0" max="1000" value="0"><div class="time-row"><span id="elapsed">0:00</span><span id="remaining">0:00</span></div></div>
+ <div class="transport"><button data-action="shuffle" id="shuffleButton">⤨</button><button data-action="previous-track">|◀</button><button class="main-play" data-action="toggle-play" id="fullToggle">▶</button><button data-action="next-track">▶|</button><button data-action="repeat" id="repeatButton">↻</button></div>
+ <div class="player-bottom"><span id="playerSource">Personal listening</span><button data-action="queue">Queue ☷</button></div>
+</div>
+<div class="toast" id="toast"></div>
+<audio id="audio" preload="none"></audio>
+<script>
+(() => {
+ "use strict";
+ const tg = window.Telegram?.WebApp;
+ const initData = tg?.initData || "";
+ const $ = (id) => document.getElementById(id);
+ const state = {
+  page:"home", profile:null, playlists:[], discover:[], liked:[], notifications:[],
+  searchMode:"music", searchResults:[], libraryScope:"mine", activePlaylist:null, activePerson:null,
+  selectedGroup:null, groupStatus:null,
+  queue:[], queueIndex:-1, currentTrack:null, shuffle:false, repeat:false,
+  dragId:null, modalTrack:null, modalPeople:[], selectedInvite:null
+ };
+ const audio = $("audio");
+ if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor("#101112"); tg.setBackgroundColor("#101112"); } catch (_) {} }
+
+ const esc = (value) => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+ const shortTime = (value) => { const n=Math.max(0,Number(value)||0); return `${Math.floor(n/60)}:${String(Math.floor(n%60)).padStart(2,"0")}`; };
+ const img = (url, cls="") => url ? `<img class="${cls}" src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<div class="${cls} cover-placeholder">♫</div>`;
+ const showToast = (message) => { const el=$("toast"); el.textContent=message; el.classList.add("show"); clearTimeout(showToast.timer); showToast.timer=setTimeout(()=>el.classList.remove("show"),2600); };
+ const api = async (path, options={}) => {
+  if (!initData) throw new Error("Open Taalune from the Telegram bot to continue.");
+  const headers={"X-Telegram-Init-Data":initData,...(options.headers||{})};
+  if (options.body && !headers["Content-Type"]) headers["Content-Type"]="application/json";
+  const response=await fetch(path,{...options,headers});
+  const type=response.headers.get("content-type")||"";
+  const data=type.includes("application/json")?await response.json():{};
+  if (!response.ok || data.ok===false) throw new Error(data.message || data.error || `Request failed (${response.status})`);
+  return data;
+ };
+ const go = (page) => {
+  state.page=page;
+  document.querySelectorAll(".page").forEach(el=>el.classList.toggle("active",el.id===`page-${page}`));
+  document.querySelectorAll(".nav-btn").forEach(el=>el.classList.toggle("active",el.dataset.page===page));
+  window.scrollTo({top:0,behavior:"smooth"});
+  if(page==="home") loadHome();
+  if(page==="library") loadLibrary();
+  if(page==="profile") renderProfile();
+  if(page==="notifications") loadNotifications();
+  if(page==="search") renderSearchShell();
+  if(page==="groups") renderGroups();
+ };
+ const playlistCard = p => `<article class="playlist-card"><button class="ghost" style="padding:0;width:100%;text-align:left" data-action="open-playlist" data-id="${esc(p.id)}">${img(p.cover_url,"cover")}<div class="card-title">${esc(p.name)}</div><div class="card-meta">${esc(p.visibility)} · ${p.track_count||0} songs</div></button><div class="row" style="justify-content:space-between;margin-top:8px"><span class="small muted">♥ ${p.like_count||0}</span><button class="track-action" data-action="playlist-follow" data-id="${esc(p.id)}" aria-label="Follow playlist">${p.followed?"✓":"＋"}</button></div></article>`;
+ const trackRow = (t, index, opts={}) => `<div class="track-row" ${opts.draggable?'draggable="true"':''} data-track-id="${esc(t.id)}" data-index="${index}">${opts.draggable?'<span class="track-grip" title="Drag to reorder">⠿</span>':''}${img(t.thumbnail,"track-cover")}<div class="grow"><div class="track-title">${esc(t.title)}</div><div class="track-sub">${esc(t.artist||"Unknown artist")} · ${shortTime(t.duration_sec)}</div></div><div class="track-actions"><button class="track-action" data-action="like-track" data-id="${esc(t.id)}" title="Like">♡</button>${opts.add?`<button class="track-action" data-action="add-track" data-id="${esc(t.id)}" title="Add to playlist">＋</button>`:""}${opts.group?`<button class="track-action" data-action="group-track" data-id="${esc(t.id)}" title="Queue in selected group">◉</button>`:""}<button class="play-circle" data-action="play-track" data-id="${esc(t.id)}">▶</button></div></div>`;
+ const setAvatar = () => { const p=state.profile; const el=$("topAvatar"); el.src=p?.avatar_url||""; el.style.visibility=p?.avatar_url?"visible":"hidden"; };
+
+ async function loadProfile(){ const r=await api("/api/profile");state.profile=r.profile;setAvatar(); }
+ async function loadHome(){
+  const page=$("page-home");
+  page.innerHTML=`<div class="eyebrow">Your listening space</div><h1 class="page-title">Good music,<br>good moments.</h1><div class="row"><button class="primary" data-page="search">Find music</button><button class="secondary" data-page="library">Your library</button></div><div class="section-head"><h2>Made for you</h2><button data-page="search">Explore</button></div><div id="homeDiscover" class="grid"><div class="empty">Loading playlists…</div></div><div class="section-head"><h2>Your playlists</h2><button data-page="library">See all</button></div><div id="homeMine" class="grid"></div>`;
+  try{
+   const [d,m]=await Promise.all([api("/api/playlists?scope=discover&limit=12"),api("/api/playlists?scope=mine&limit=12")]);
+   state.discover=d.results||[];state.playlists=m.results||[];
+   $("homeDiscover").innerHTML=state.discover.length?state.discover.map(playlistCard).join(""):`<div class="empty" style="grid-column:1/-1">Public playlists will appear here.</div>`;
+   $("homeMine").innerHTML=state.playlists.length?state.playlists.map(playlistCard).join(""):`<div class="empty" style="grid-column:1/-1">Create your first playlist.</div>`;
+  }catch(e){$("homeDiscover").innerHTML=`<div class="empty" style="grid-column:1/-1">${esc(e.message)}</div>`;}
+ }
+ function renderSearchShell(){
+  $("page-search").innerHTML=`<div class="eyebrow">Find something to play</div><h1 class="page-title">Search</h1><div class="searchbar"><span>⌕</span><input id="searchInput" autocomplete="off" maxlength="120" placeholder="Songs, people or playlists"></div><div class="pill-row"><button class="pill ${state.searchMode==="music"?"active":""}" data-search-mode="music">Music</button><button class="pill ${state.searchMode==="people"?"active":""}" data-search-mode="people">People</button><button class="pill ${state.searchMode==="playlists"?"active":""}" data-search-mode="playlists">Playlists</button></div><div id="searchStatus" class="muted small" style="margin:12px 0">Search songs, find people or discover playlists.</div><div id="searchResults" class="list"></div>`;
+ }
+ async function runSearch(){
+  const input=$("searchInput"); if(!input)return; const q=input.value.trim();if(q.length<2){$("searchStatus").textContent="Type at least two characters.";$("searchResults").replaceChildren();return;}
+  const results=$("searchResults"),status=$("searchStatus");status.textContent="Searching…";results.replaceChildren();
+  try{
+   let data;
+   if(state.searchMode==="music") data=await api("/api/search",{method:"POST",body:JSON.stringify({query:q})});
+   else data=await api(`/api/search/${state.searchMode}?q=${encodeURIComponent(q)}&limit=25`);
+   state.searchResults=data.results||[];
+   if(state.searchMode==="music"){
+    results.innerHTML=state.searchResults.length?state.searchResults.map((t,i)=>trackRow(t,i,{add:true,group:Boolean(state.selectedGroup)})).join(""):`<div class="empty">No songs found.</div>`;
+   }else if(state.searchMode==="people"){
+    results.innerHTML=state.searchResults.length?state.searchResults.map(p=>`<div class="person-row">${img(p.avatar_url,"person-avatar")}<div class="grow"><div class="track-title">${esc(p.display_name)}</div><div class="track-sub">@${esc(p.handle)} · ${p.visibility==="private"?"Private profile":`${p.followers??0} followers`}</div></div><button class="secondary" data-action="follow-person" data-id="${p.user_id}">${p.follow_state==="accepted"?"Following":p.follow_state==="pending"?"Requested":"Follow"}</button><button class="icon-btn" data-action="open-person" data-handle="${esc(p.handle)}">›</button></div>`).join(""):`<div class="empty">No people found.</div>`;
+   }else{
+    results.innerHTML=state.searchResults.length?`<div class="grid">${state.searchResults.map(playlistCard).join("")}</div>`:`<div class="empty">No public playlists found.</div>`;
+   }
+   status.textContent=`${state.searchResults.length} result${state.searchResults.length===1?"":"s"}`;
+  }catch(e){status.textContent=e.message;}
+ }
+ let searchTimer;
+ function setSearchMode(mode){state.searchMode=mode;document.querySelectorAll("[data-search-mode]").forEach(b=>b.classList.toggle("active",b.dataset.searchMode===mode));runSearch();}
+ async function loadLibrary(){
+  const page=$("page-library");page.innerHTML=`<div class="eyebrow">Your collection</div><div class="row" style="justify-content:space-between"><h1 class="page-title">Your Library</h1><button class="primary" data-action="create-playlist">＋ Create</button></div><div class="pill-row"><button class="pill active" data-library-scope="mine">Playlists</button><button class="pill" data-library-scope="following">Following</button><button class="pill" data-library-scope="collaborating">Collaborating</button><button class="pill" data-library-scope="liked">Liked songs</button></div><div id="libraryItems" class="grid" style="margin-top:14px"></div>`;
+  await showLibraryScope("mine");
+ }
+ async function showLibraryScope(scope){
+  state.libraryScope=scope;
+  document.querySelectorAll("[data-library-scope]").forEach(b=>b.classList.toggle("active",b.dataset.libraryScope===scope));
+  const target=$("libraryItems");target.innerHTML=`<div class="empty" style="grid-column:1/-1">Loading…</div>`;
+  try{
+   if(scope==="liked"){
+    const d=await api("/api/library/liked-tracks?limit=50");state.liked=d.results||[];
+    target.className="list";target.innerHTML=state.liked.length?state.liked.map((t,i)=>trackRow(t,i)).join(""):`<div class="empty">Songs you like will live here.</div>`;
+   }else{
+    const d=await api(`/api/playlists?scope=${scope}&limit=50`);const arr=d.results||[];
+    target.className="grid";target.innerHTML=arr.length?arr.map(playlistCard).join(""):`<div class="empty" style="grid-column:1/-1">Nothing here yet.</div>`;
+   }
+  }catch(e){target.innerHTML=`<div class="empty" style="grid-column:1/-1">${esc(e.message)}</div>`;}
+ }
+ function renderGroups(){
+  const preset=new URLSearchParams(location.search).get("chat_id")||"";
+  $("page-groups").innerHTML=`<div class="eyebrow">Telegram voice chats</div><h1 class="page-title">Group player</h1><p class="muted small">Enter a supergroup ID. Taalune verifies your membership, the bot and its assigned assistant before every control action.</p><div class="searchbar"><span>⌕</span><input id="groupIdInput" inputmode="numeric" placeholder="Group ID · -100…" value="${esc(state.selectedGroup?.chat_id||preset)}"></div><button class="primary" data-action="check-group">Connect group</button><div id="groupStatusPanel" style="margin-top:18px">${state.selectedGroup?'<div class="empty">Checking selected group…</div>':'<div class="empty">No group selected. Paste the supergroup ID to connect.</div>'}</div>`;
+  if(state.selectedGroup) refreshGroupStatus().catch(e=>{$("groupStatusPanel").innerHTML=`<div class="empty">${esc(e.message)}</div>`;});
+ }
+ async function refreshGroupStatus(){
+  if(!state.selectedGroup)return;
+  const panel=$("groupStatusPanel");if(!panel)return;
+  const d=await api(`/api/groups/${encodeURIComponent(state.selectedGroup.chat_id)}/status`);state.groupStatus=d.group;
+  const g=d.group;const current=g.current;
+  panel.innerHTML=`<div class="track-row"><div class="grow"><div class="track-title">${esc(g.title)}</div><div class="track-sub">${esc(g.chat_id)} · You: ${esc(g.user_status)} · Assistant: verified</div></div><span class="small" style="color:var(--accent)">${g.can_control?"Control access":"View only"}</span></div><div class="section-head"><h2>Now playing</h2><span class="small muted">${g.active?(g.playing?"Playing":"Paused"):"Not playing"}</span></div>${current?`<div class="track-row">${img(current.thumbnail,"track-cover")}<div class="grow"><div class="track-title">${esc(current.title)}</div><div class="track-sub">${esc(current.artist)} · ${shortTime(current.duration_sec)}</div></div></div>`:'<div class="empty">Nothing is playing in this group.</div>'}${g.can_control?`<div class="detail-actions">${g.active?`<button class="secondary" data-action="group-control" data-command="${g.playing?"pause":"resume"}">${g.playing?"Ⅱ Pause":"▶ Resume"}</button><button class="secondary" data-action="group-control" data-command="skip">Next »</button><button class="danger" data-action="group-control" data-command="stop">Stop</button>`:`<span class="small muted">Choose a song in Search or open a playlist to start group playback.</span>`}<button class="secondary" data-action="refresh-group">Refresh</button></div>`:`<div class="empty">You are a group member, but only group admins or authorized users can control playback.</div>`}<div class="section-head"><h2>Up next</h2><span class="small muted">${g.queue_count} songs</span></div><div class="list">${(g.queue||[]).map((t,i)=>`<div class="track-row">${img(t.thumbnail,"track-cover")}<div class="grow"><div class="track-title">${esc(t.title)}</div><div class="track-sub">${esc(t.artist)}</div></div></div>`).join("")||'<div class="small muted">The queue is empty.</div>'}</div>`;
+ }
+ async function connectGroup(){
+  const input=$("groupIdInput");const id=Number(input?.value.trim());if(!Number.isSafeInteger(id)||id>=0){showToast("Enter a valid supergroup ID starting with -100.");return;}
+  state.selectedGroup={chat_id:id};
+  try{await refreshGroupStatus();showToast("Group verified");}
+  catch(e){state.selectedGroup=null;state.groupStatus=null;$("groupStatusPanel").innerHTML=`<div class="empty">${esc(e.message)}</div>`;showToast(e.message);}
+ }
+ async function groupControl(action,payload={}){
+  if(!state.selectedGroup)throw new Error("Connect a group first.");
+  const d=await api(`/api/groups/${encodeURIComponent(state.selectedGroup.chat_id)}/control`,{method:"POST",body:JSON.stringify({action,...payload})});
+  showToast(d.status==="queued"?`Added to group queue${d.position!==undefined?` · position ${d.position+1}`:""}`:action==="stop"?"Group playback stopped":"Group playback updated");
+  await refreshGroupStatus();
+ }
+ function renderProfile(){
+  const p=state.profile;if(!p){$("page-profile").innerHTML='<div class="empty">Loading profile…</div>';return;}
+  $("page-profile").innerHTML=`<div class="eyebrow">Your account</div><div class="profile-head">${p.avatar_url?`<img class="profile-big-avatar" src="${esc(p.avatar_url)}" alt="">`:'<div class="profile-big-avatar" style="display:grid;place-items:center;margin:0 auto 12px">♫</div>'}<h1 style="margin:0;font-size:25px">${esc(p.display_name)}</h1><div class="muted" style="margin-top:4px">@${esc(p.handle)}</div><p class="muted" style="font-size:13px;max-width:420px;margin:12px auto">${esc(p.bio||"")}</p><div class="stat-row"><div class="stat"><strong>${p.followers??0}</strong><span>Followers</span></div><div class="stat"><strong>${p.following??0}</strong><span>Following</span></div></div><button class="secondary" data-action="edit-profile">Edit profile</button></div><div class="divider"></div><div class="section-head"><h2>Your public playlists</h2><button data-page="library">Library</button></div><div id="profilePlaylists" class="grid"></div><div class="section-head"><h2>Privacy</h2></div><div class="track-row"><div class="grow"><div class="track-title">Profile visibility</div><div class="track-sub">${p.visibility}</div></div><button class="secondary" data-action="toggle-profile-privacy">Change</button></div>`;
+  api("/api/playlists?scope=mine&limit=30").then(d=>{$("profilePlaylists").innerHTML=(d.results||[]).filter(x=>x.visibility==="public").map(playlistCard).join("")||'<div class="empty" style="grid-column:1/-1">No public playlists yet.</div>';}).catch(()=>{});
+ }
+ async function loadNotifications(){
+  const page=$("page-notifications");page.innerHTML=`<div class="eyebrow">Your activity</div><h1 class="page-title">Notifications</h1><div id="notificationItems" class="list"></div>`;
+  try{
+   const d=await api("/api/notifications?limit=40");state.notifications=d.results||[];
+   $("notificationItems").innerHTML=state.notifications.length?state.notifications.map(n=>{
+    let msg="You have an update.";let actions="";const pl=n.payload||{};const actor=n.actor?.display_name||"Someone";
+    if(n.type==="collaboration_invitation"){msg=`${actor} invited you to collaborate on <b>${esc(pl.playlist_name)}</b> as ${esc(pl.role)}.`;actions=`<button class="primary" data-action="invitation" data-id="${esc(pl.invitation_id)}" data-choice="accept">Accept</button><button class="secondary" data-action="invitation" data-id="${esc(pl.invitation_id)}" data-choice="reject">Decline</button>`;}
+    else if(n.type==="follow_request"){msg=`${actor} wants to follow you.`;actions=`<button class="primary" data-action="follow-response" data-id="${pl.follower_id}" data-choice="accept">Accept</button><button class="secondary" data-action="follow-response" data-id="${pl.follower_id}" data-choice="reject">Decline</button>`;}
+    else if(n.type==="new_follower")msg=`${actor} started following you.`;
+    else if(n.type==="playlist_followed")msg=`${actor} followed your playlist <b>${esc(pl.playlist_name)}</b>.`;
+    else if(n.type.startsWith("collaboration_"))msg=`${actor} ${n.type.replace("collaboration_","collaboration ").replaceAll("_"," ")} ${esc(pl.playlist_name||"your playlist")}.`;
+    else if(n.type==="follow_accepted")msg=`${actor} accepted your follow request.`;
+    else if(n.type==="collaboration_role_changed")msg=`Your role on <b>${esc(pl.playlist_name)}</b> is now ${esc(pl.role)}.`;
+    else if(n.type==="collaboration_removed")msg=`You were removed from <b>${esc(pl.playlist_name)}</b>.`;
+    return `<div class="notification ${n.read?"":"unread"}"><div style="font-size:21px">${n.type.includes("collaboration")?"♫":n.type.includes("follow")?"◉":"•"}</div><div class="grow"><p>${msg}</p><div class="small muted" style="margin-top:6px">${esc(n.created_at||"")}</div>${actions?`<div class="notification-actions">${actions}</div>`:""}</div><button class="ghost" data-action="read-notification" data-id="${esc(n.id)}">${n.read?"":"Mark read"}</button></div>`;
+   }).join(""):`<div class="empty">You're all caught up.</div>`;
+  }catch(e){$("notificationItems").innerHTML=`<div class="empty">${esc(e.message)}</div>`;}
+ }
+ async function openPlaylist(id){
+  try{
+   const d=await api(`/api/playlists/${encodeURIComponent(id)}`);state.activePlaylist=d.playlist;renderPlaylist();go("playlist");
+  }catch(e){showToast(e.message);}
+ }
+ function renderPlaylist(){
+  const p=state.activePlaylist;if(!p)return;const canEdit=["owner","editor"].includes(p.role);const canAdd=["owner","editor","contributor"].includes(p.role);const isOwner=p.role==="owner";
+  const cover=p.cover_url?`<img class="detail-cover" src="${esc(p.cover_url)}" alt="">`:`<div class="detail-cover cover-placeholder">${esc(p.icon||"♫")}</div>`;
+  $("page-playlist").innerHTML=`<button class="ghost" data-page="library">← Back to library</button><div class="detail-head">${cover}<div class="grow"><div class="eyebrow">${esc(p.visibility)} playlist</div><div class="detail-name">${esc(p.name)}</div><div class="small muted" style="margin-top:7px">${p.track_count} songs · by @${esc(p.owner?.handle||"")}</div><div class="small muted" style="margin-top:4px">♥ ${p.like_count} · ${p.follower_count} followers</div></div></div><p class="muted small">${esc(p.description||"")}</p><div class="detail-actions"><button class="primary" data-action="play-playlist">▶ Play</button><button class="secondary" data-action="like-playlist" data-id="${esc(p.id)}">${p.liked?"♥ Liked":"♡ Like"}</button>${p.owner?.user_id!==state.profile?.user_id?`<button class="secondary" data-action="playlist-follow" data-id="${esc(p.id)}">${p.followed?"Following":"Follow"}</button>`:""}${canAdd?'<button class="secondary" data-action="add-from-search">＋ Add songs</button>':''}${state.selectedGroup?'<button class="secondary" data-action="group-play-playlist">▶ Play in group</button><button class="secondary" data-action="group-queue-playlist">＋ Queue in group</button>':''}${canEdit?'<button class="secondary" data-action="edit-playlist">Edit</button>':''}${isOwner?'<button class="secondary" data-action="invite-collaborator">Invite</button><button class="danger" data-action="delete-playlist">Delete</button>':''}</div><div class="section-head"><h2>Tracks</h2><span class="small muted">${p.tracks?.length||0} songs</span></div><div id="playlistTracks" class="list">${(p.tracks||[]).map((t,i)=>trackRow(t,i,{draggable:canEdit})).join("")||'<div class="empty">This playlist is empty. Add a song to get started.</div>'}</div>${isOwner?`<div class="section-head"><h2>Collaborators</h2></div><div class="list">${(p.collaborators||[]).map(c=>`<div class="person-row"><div class="grow"><div class="track-title">${esc(c.display_name||c.handle||"Listener")}</div><div class="track-sub">@${esc(c.handle||"unknown")} · ${esc(c.role)}</div></div><button class="track-action" data-action="remove-collaborator" data-id="${c.user_id}">×</button><button class="track-action" data-action="change-collaborator" data-id="${c.user_id}">⋯</button></div>`).join("")||'<div class="small muted">No collaborators yet.</div>'}</div>`:""}`;
+  }
+ async function reloadActivePlaylist(){if(state.activePlaylist){const d=await api(`/api/playlists/${encodeURIComponent(state.activePlaylist.id)}`);state.activePlaylist=d.playlist;renderPlaylist();}}
+ async function playTrack(track, queue=null, index=0){
+  if(!track)return;
+  try{
+   let streamUrl=track.stream_url;
+   if(!streamUrl){const token=await api("/api/stream-token",{method:"POST",body:JSON.stringify({video_id:track.id})});streamUrl=token.stream_url;}
+   state.currentTrack={...track,stream_url:streamUrl};
+   if(queue){state.queue=queue.slice();state.queueIndex=index;}
+   else{state.queue=[{...track,stream_url:streamUrl}];state.queueIndex=0;}
+   audio.src=streamUrl;audio.load();
+   await audio.play();
+   updatePlayer();setMediaSession();
+  }catch(e){showToast(e.message||"Could not start playback. Tap play to retry.");}
+ }
+ function updatePlayer(){
+  const t=state.currentTrack;if(!t){$("miniPlayer").classList.remove("visible");return;}
+  $("miniPlayer").classList.add("visible");$("miniCover").src=t.thumbnail||"";$("miniTitle").textContent=t.title||"Unknown track";$("miniArtist").textContent=t.artist||"Unknown artist";
+  $("miniToggle").textContent=audio.paused?"▶":"Ⅱ";$("fullToggle").textContent=audio.paused?"▶":"Ⅱ";
+  $("fullCover").src=t.thumbnail||"";$("fullTitle").textContent=t.title||"Unknown track";$("fullArtist").textContent=t.artist||"Unknown artist";
+ }
+ function setMediaSession(){
+  if(!("mediaSession" in navigator)||!state.currentTrack)return;
+  const t=state.currentTrack;try{
+   navigator.mediaSession.metadata=new MediaMetadata({title:t.title||"Unknown track",artist:t.artist||"Unknown artist",album:"Taalune",artwork:t.thumbnail?[{src:t.thumbnail,sizes:"512x512",type:"image/jpeg"}]:[]});
+   navigator.mediaSession.setActionHandler("play",()=>audio.play().then(updatePlayer).catch(()=>{}));
+   navigator.mediaSession.setActionHandler("pause",()=>{audio.pause();updatePlayer();});
+   navigator.mediaSession.setActionHandler("nexttrack",nextTrack);
+   navigator.mediaSession.setActionHandler("previoustrack",previousTrack);
+  }catch(_){}
+ }
+ function togglePlay(){if(!audio.src)return;if(audio.paused)audio.play().then(()=>{updatePlayer();setMediaSession();}).catch(()=>showToast("Playback could not resume. Tap play again."));else{audio.pause();updatePlayer();}}
+ async function nextTrack(){
+  if(!state.queue.length)return;
+  let next;
+  if(state.shuffle&&state.queue.length>1){let n=state.queueIndex;while(n===state.queueIndex)n=Math.floor(Math.random()*state.queue.length);state.queueIndex=n;}
+  else if(state.queueIndex+1<state.queue.length)state.queueIndex++;
+  else if(state.repeat)state.queueIndex=0;else{audio.pause();state.currentTrack=null;updatePlayer();return;}
+  next=state.queue[state.queueIndex];await playTrack(next,state.queue,state.queueIndex);
+ }
+ async function previousTrack(){if(audio.currentTime>3){audio.currentTime=0;return;}if(state.queueIndex>0){state.queueIndex--;await playTrack(state.queue[state.queueIndex],state.queue,state.queueIndex);}}
+ function openQueue(){
+  $("queueCaption").textContent=state.currentTrack?`Playing ${state.currentTrack.title}`:"Nothing playing";
+  $("queueItems").innerHTML=state.queue.length?state.queue.map((t,i)=>`<div class="track-row"><div class="grow"><div class="track-title">${i===state.queueIndex?"▶ ":""}${esc(t.title)}</div><div class="track-sub">${esc(t.artist||"")}</div></div><button class="track-action" data-action="queue-play" data-index="${i}">▶</button><button class="track-action" data-action="queue-remove" data-index="${i}">×</button></div>`).join(""):`<div class="empty">Queue is empty.</div>`;
+  $("queueOverlay").classList.add("open");
+ }
+ function openSheet(title, body, actions){$("sheetTitle").textContent=title;$("sheetBody").innerHTML=body;$("sheetActions").innerHTML=actions;$("sheetOverlay").classList.add("open");}
+ function closeSheet(){$("sheetOverlay").classList.remove("open");state.selectedInvite=null;}
+ function createPlaylistSheet(){
+  openSheet("Create playlist",`<div class="field"><label>PLAYLIST NAME</label><input id="newPlaylistName" maxlength="80" placeholder="Give it a name"></div><div class="field"><label>DESCRIPTION</label><textarea id="newPlaylistDescription" maxlength="500" placeholder="What is this playlist about?"></textarea></div><div class="field"><label>VISIBILITY</label><select id="newPlaylistVisibility"><option value="private">Private</option><option value="public">Public</option><option value="unlisted">Unlisted · link only</option></select></div><div class="field"><label>COVER IMAGE URL (HTTPS)</label><input id="newPlaylistCover" placeholder="https://…"></div>`,`<button class="secondary" data-action="close-sheet">Cancel</button><button class="primary" data-action="save-playlist">Create playlist</button>`);
+ }
+ function editPlaylistSheet(){const p=state.activePlaylist;openSheet("Edit playlist",`<div class="field"><label>NAME</label><input id="editPlaylistName" maxlength="80" value="${esc(p.name)}"></div><div class="field"><label>DESCRIPTION</label><textarea id="editPlaylistDescription" maxlength="500">${esc(p.description||"")}</textarea></div><div class="field"><label>COVER IMAGE URL</label><input id="editPlaylistCover" value="${esc(p.cover_url||"")}" placeholder="https://…"></div>${p.role==="owner"?`<div class="field"><label>VISIBILITY</label><select id="editPlaylistVisibility"><option value="private" ${p.visibility==="private"?"selected":""}>Private</option><option value="public" ${p.visibility==="public"?"selected":""}>Public</option><option value="unlisted" ${p.visibility==="unlisted"?"selected":""}>Unlisted</option></select></div>`:""}`,`<button class="secondary" data-action="close-sheet">Cancel</button><button class="primary" data-action="save-playlist-edit">Save</button>`);}
+ function addTrackSheet(track){state.modalTrack=track;const options=state.playlists.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");openSheet("Add to playlist",`<div class="track-row">${img(track.thumbnail,"track-cover")}<div class="grow"><div class="track-title">${esc(track.title)}</div><div class="track-sub">${esc(track.artist||"")}</div></div></div><div class="field"><label>CHOOSE PLAYLIST</label><select id="targetPlaylist">${options||"<option value=''>No playlists</option>"}</select></div>`, `<button class="secondary" data-action="close-sheet">Cancel</button><button class="primary" data-action="confirm-add-track" ${options?"":"disabled"}>Add song</button>`);}
+ async function inviteSheet(){
+  if(!state.playlists.length)state.playlists=(await api("/api/playlists?scope=mine&limit=50")).results||[];
+  openSheet("Invite collaborator",`<div class="field"><label>SEARCH PEOPLE</label><input id="inviteSearch" placeholder="Search by name or username" maxlength="64"></div><div id="invitePeople" class="list"></div><div class="field"><label>ROLE</label><select id="inviteRole"><option value="editor">Editor · add, remove, reorder</option><option value="contributor">Contributor · add songs</option><option value="viewer">Viewer · view only</option></select></div><div class="field"><label>PLAYLIST</label><select id="invitePlaylist">${state.playlists.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</select></div>`,`<button class="secondary" data-action="close-sheet">Cancel</button><button class="primary" data-action="send-invite" disabled id="sendInviteButton">Send invite</button>`);
+  $("inviteSearch").addEventListener("input",()=>{clearTimeout(inviteSheet.timer);inviteSheet.timer=setTimeout(searchInvitePeople,250);});
+ }
+ async function searchInvitePeople(){const q=$("inviteSearch")?.value.trim();if(!q||q.length<2)return;try{const d=await api(`/api/search/people?q=${encodeURIComponent(q)}&limit=10`);state.modalPeople=d.results||[];$("invitePeople").innerHTML=state.modalPeople.map(p=>`<button class="person-row" style="width:100%;text-align:left;background:transparent" data-action="select-invitee" data-id="${p.user_id}">${img(p.avatar_url,"person-avatar")}<span class="grow"><b>${esc(p.display_name)}</b><span class="track-sub">@${esc(p.handle)}</span></span><span>${state.selectedInvite===p.user_id?"✓":"＋"}</span></button>`).join("")||'<div class="small muted">No matching people.</div>'; }catch(e){showToast(e.message);}}
+ function editProfileSheet(){const p=state.profile;openSheet("Edit profile",`<div class="field"><label>USERNAME</label><input id="profileHandle" maxlength="24" value="${esc(p.handle)}"></div><div class="field"><label>DISPLAY NAME</label><input id="profileName" maxlength="48" value="${esc(p.display_name)}"></div><div class="field"><label>BIO</label><textarea id="profileBio" maxlength="160">${esc(p.bio||"")}</textarea></div><div class="field"><label>PROFILE IMAGE URL (HTTPS)</label><input id="profileAvatar" value="${esc(p.avatar_url||"")}" placeholder="https://…"></div><div class="field"><label>PROFILE VISIBILITY</label><select id="profileVisibility"><option value="public" ${p.visibility==="public"?"selected":""}>Public</option><option value="private" ${p.visibility==="private"?"selected":""}>Private</option></select></div><div class="field"><label>SEARCH DISCOVERY</label><select id="profileDiscoverable"><option value="true" ${p.discoverable!==false?"selected":""}>Allow people to find me</option><option value="false" ${p.discoverable===false?"selected":""}>Hide me from people search</option></select></div>`,`<button class="secondary" data-action="close-sheet">Cancel</button><button class="primary" data-action="save-profile">Save changes</button>`);}
+ async function openPerson(handle){try{const d=await api(`/api/people/${encodeURIComponent(handle)}`);state.activePerson=d;const p=d.profile;$("page-person").innerHTML=`<button class="ghost" data-page="search">← Back</button><div class="profile-head">${img(p.avatar_url,"profile-big-avatar")}<h1>${esc(p.display_name)}</h1><div class="muted">@${esc(p.handle)}</div><p class="muted small">${esc(p.bio||"")}</p><div class="stat-row"><div class="stat"><strong>${p.followers??"—"}</strong><span>Followers</span></div><div class="stat"><strong>${p.following??"—"}</strong><span>Following</span></div></div>${p.is_self?"":`<button class="primary" data-action="follow-person" data-id="${p.user_id}">${p.follow_state==="accepted"?"Following":p.follow_state==="pending"?"Requested":"Follow"}</button>`}</div><div class="section-head"><h2>Public playlists</h2></div><div class="grid">${(d.playlists||[]).map(playlistCard).join("")||'<div class="empty" style="grid-column:1/-1">No public playlists.</div>'}</div>`;go("person");}catch(e){showToast(e.message);}}
+
+ document.addEventListener("click",async(event)=>{
+  const pageBtn=event.target.closest("[data-page]");if(pageBtn){go(pageBtn.dataset.page);return;}
+  const modeBtn=event.target.closest("[data-search-mode]");if(modeBtn){setSearchMode(modeBtn.dataset.searchMode);return;}
+  const scopeBtn=event.target.closest("[data-library-scope]");if(scopeBtn){showLibraryScope(scopeBtn.dataset.libraryScope);return;}
+  const b=event.target.closest("[data-action]");if(!b)return;const action=b.dataset.action,id=b.dataset.id;
+  try{
+   if(action==="notifications"){go("notifications");}
+   else if(action==="profile"){go("profile");}
+   else if(action==="create-playlist")createPlaylistSheet();
+   else if(action==="close-sheet")closeSheet();
+   else if(action==="close-queue")$("queueOverlay").classList.remove("open");
+   else if(action==="open-playlist")await openPlaylist(id);
+   else if(action==="open-person")await openPerson(b.dataset.handle);
+   else if(action==="play-track"){
+    const list=state.page==="playlist"?(state.activePlaylist?.tracks||[]):(state.page==="library"&&state.libraryScope==="liked"?state.liked:state.searchResults);
+    const track=list.find(t=>t.id===id)||[...state.searchResults,...state.liked,...(state.activePlaylist?.tracks||[])].find(t=>t.id===id);
+    if(track){const queue=list.some(t=>t.id===id)?list:[track];const idx=queue.findIndex(x=>x.id===id);await playTrack(track,queue,Math.max(0,idx));}
+   }
+   else if(action==="add-track"){const t=state.searchResults.find(x=>x.id===id);if(t){if(!state.playlists.length)state.playlists=(await api("/api/playlists?scope=mine&limit=50")).results||[];addTrackSheet(t);}}
+   else if(action==="like-track"){
+    const t=[...state.searchResults,...state.liked,...(state.activePlaylist?.tracks||[])].find(x=>x.id===id)||state.currentTrack;
+    if(!t)throw new Error("Song details unavailable");
+    if(state.page==="library"&&state.libraryScope==="liked"){
+     await api(`/api/tracks/${id}/like`,{method:"DELETE"});await showLibraryScope("liked");showToast("Removed from Liked Songs");
+    }else{
+     await api(`/api/tracks/${id}/like`,{method:"POST",body:JSON.stringify(t)});b.textContent="♥";showToast("Added to Liked Songs");
+    }
+   }
+   else if(action==="playlist-follow"){const p=(await api(`/api/playlists/${id}`)).playlist;const method=p.followed?"DELETE":"POST";await api(`/api/playlists/${id}/follow`,{method});showToast(p.followed?"Playlist unfollowed":"Playlist followed");if(state.activePlaylist?.id===id)await reloadActivePlaylist();else if(state.page==="home")loadHome();}
+   else if(action==="like-playlist"){const p=state.activePlaylist;await api(`/api/playlists/${p.id}/like`,{method:p.liked?"DELETE":"POST"});await reloadActivePlaylist();}
+   else if(action==="play-playlist"){const p=state.activePlaylist;if(!p?.tracks?.length)throw new Error("Playlist is empty");await playTrack(p.tracks[0],p.tracks,0);}
+   else if(action==="edit-playlist")editPlaylistSheet();
+   else if(action==="save-playlist-edit"){
+    const p=state.activePlaylist,body={name:$("editPlaylistName").value,description:$("editPlaylistDescription").value,cover_url:$("editPlaylistCover").value||null};const vis=$("editPlaylistVisibility");if(vis)body.visibility=vis.value;const d=await api(`/api/playlists/${p.id}`,{method:"PATCH",body:JSON.stringify(body)});state.activePlaylist=d.playlist;closeSheet();renderPlaylist();showToast("Playlist updated");
+   }
+   else if(action==="save-playlist"){
+    const body={name:$("newPlaylistName").value,description:$("newPlaylistDescription").value,visibility:$("newPlaylistVisibility").value,cover_url:$("newPlaylistCover").value||null};const d=await api("/api/playlists",{method:"POST",body:JSON.stringify(body)});closeSheet();showToast("Playlist created");await openPlaylist(d.playlist.id);
+   }
+   else if(action==="confirm-add-track"){
+    const playlistId=$("targetPlaylist").value;if(!playlistId||!state.modalTrack)throw new Error("Choose a playlist first");await api(`/api/playlists/${playlistId}/tracks`,{method:"POST",body:JSON.stringify(state.modalTrack)});closeSheet();showToast("Song added to playlist");if(state.activePlaylist?.id===playlistId)await reloadActivePlaylist();
+   }
+   else if(action==="add-from-search"){go("search");setSearchMode("music");showToast("Search for a song, then tap + to add it.");}
+   else if(action==="invite-collaborator")await inviteSheet();
+   else if(action==="delete-playlist"){
+    if(!confirm("Delete this playlist? This will hide it from everyone."))return;
+    await api(`/api/playlists/${state.activePlaylist.id}`,{method:"DELETE"});state.activePlaylist=null;showToast("Playlist deleted");go("library");
+   }
+   else if(action==="select-invitee"){state.selectedInvite=Number(id);$("sendInviteButton").disabled=false;searchInvitePeople();}
+   else if(action==="send-invite"){
+    if(!state.selectedInvite)throw new Error("Choose a person first");const playlistId=$("invitePlaylist").value;await api(`/api/playlists/${playlistId}/invitations`,{method:"POST",body:JSON.stringify({user_id:state.selectedInvite,role:$("inviteRole").value})});closeSheet();showToast("Collaboration invitation sent");
+   }
+   else if(action==="invitation"){await api(`/api/invitations/${encodeURIComponent(id)}/respond`,{method:"POST",body:JSON.stringify({action:b.dataset.choice})});showToast(b.dataset.choice==="accept"?"Invitation accepted":"Invitation declined");loadNotifications();}
+   else if(action==="follow-response"){await api(`/api/people/${id}/follow-response`,{method:"POST",body:JSON.stringify({action:b.dataset.choice})});showToast("Follow request updated");loadNotifications();}
+   else if(action==="follow-person"){const response=await api(`/api/people/${id}/follow`,{method:"POST"});b.textContent=response.status==="pending"?"Requested":"Following";showToast(response.status==="pending"?"Follow request sent":"Following");}
+   else if(action==="read-notification"){await api(`/api/notifications/${encodeURIComponent(id)}/read`,{method:"POST"});b.textContent="Read";b.closest(".notification")?.classList.remove("unread");}
+   else if(action==="edit-profile")editProfileSheet();
+   else if(action==="save-profile"){
+    const body={handle:$("profileHandle").value,display_name:$("profileName").value,bio:$("profileBio").value,avatar_url:$("profileAvatar").value||null,visibility:$("profileVisibility").value,discoverable:$("profileDiscoverable").value==="true"};const d=await api("/api/profile",{method:"PATCH",body:JSON.stringify(body)});state.profile=d.profile;setAvatar();closeSheet();renderProfile();showToast("Profile updated");
+   }
+   else if(action==="toggle-profile-privacy"){state.profile.visibility=state.profile.visibility==="public"?"private":"public";const d=await api("/api/profile",{method:"PATCH",body:JSON.stringify({visibility:state.profile.visibility})});state.profile=d.profile;renderProfile();showToast("Profile privacy updated");}
+   else if(action==="move-track-up"||action==="move-track-down"){
+    const p=state.activePlaylist;const tracks=p.tracks.slice();const from=tracks.findIndex(t=>t.id===id);const to=from+(action==="move-track-up"?-1:1);
+    if(from<0||to<0||to>=tracks.length)return;[tracks[from],tracks[to]]=[tracks[to],tracks[from]];
+    const d=await api(`/api/playlists/${p.id}/tracks/order`,{method:"PUT",body:JSON.stringify({track_ids:tracks.map(t=>t.id),version:p.version})});state.activePlaylist=d.playlist;renderPlaylist();
+   }
+   else if(action==="remove-collaborator"){if(!confirm("Remove this collaborator from the playlist?"))return;await api(`/api/playlists/${state.activePlaylist.id}/collaborators/${id}`,{method:"DELETE"});await reloadActivePlaylist();showToast("Collaborator removed");}
+   else if(action==="change-collaborator"){const role=prompt("New role: editor, contributor or viewer","editor");if(!role)return;await api(`/api/playlists/${state.activePlaylist.id}/collaborators/${id}`,{method:"PATCH",body:JSON.stringify({role})});await reloadActivePlaylist();showToast("Collaborator role updated");}
+   else if(action==="open-player")$("fullPlayer").classList.add("open");
+   else if(action==="close-player")$("fullPlayer").classList.remove("open");
+   else if(action==="toggle-play")togglePlay();
+   else if(action==="next-track")await nextTrack();
+   else if(action==="previous-track")await previousTrack();
+   else if(action==="shuffle"){state.shuffle=!state.shuffle;b.style.color=state.shuffle?"var(--accent)":"";}
+   else if(action==="repeat"){state.repeat=!state.repeat;b.style.color=state.repeat?"var(--accent)":"";}
+   else if(action==="queue")openQueue();
+   else if(action==="queue-play"){const i=Number(b.dataset.index);await playTrack(state.queue[i],state.queue,i);$("queueOverlay").classList.remove("open");}
+   else if(action==="queue-remove"){const i=Number(b.dataset.index);state.queue.splice(i,1);if(i<state.queueIndex)state.queueIndex--;openQueue();}
+   else if(action==="like-current"){if(!state.currentTrack) return;await api(`/api/tracks/${state.currentTrack.id}/like`,{method:"POST",body:JSON.stringify(state.currentTrack)});showToast("Added to Liked Songs");}
+  }catch(e){showToast(e.message||"Something went wrong");}
+ });
+
+ document.addEventListener("input",event=>{if(event.target.id==="searchInput"){clearTimeout(searchTimer);searchTimer=setTimeout(runSearch,320);}});
+ document.addEventListener("keydown",event=>{if(event.target.id==="searchInput"&&event.key==="Enter"){event.preventDefault();runSearch();}});
+ document.addEventListener("dragstart",event=>{const row=event.target.closest(".track-row[draggable=true]");if(!row)return;state.dragId=row.dataset.trackId;row.classList.add("dragging");event.dataTransfer.effectAllowed="move";});
+ document.addEventListener("dragover",event=>{const row=event.target.closest(".track-row[draggable=true]");if(!row||!state.dragId)return;event.preventDefault();row.classList.add("drag-over");});
+ document.addEventListener("dragleave",event=>event.target.closest(".track-row")?.classList.remove("drag-over"));
+ document.addEventListener("drop",async event=>{const row=event.target.closest(".track-row[draggable=true]");if(!row||!state.dragId||!state.activePlaylist)return;event.preventDefault();const from=state.activePlaylist.tracks.findIndex(t=>t.id===state.dragId),to=Number(row.dataset.index);const tracks=state.activePlaylist.tracks.slice();const [moved]=tracks.splice(from,1);tracks.splice(to,0,moved);state.activePlaylist.tracks=tracks;renderPlaylist();try{const d=await api(`/api/playlists/${state.activePlaylist.id}/tracks/order`,{method:"PUT",body:JSON.stringify({track_ids:tracks.map(t=>t.id),version:state.activePlaylist.version})});state.activePlaylist=d.playlist;renderPlaylist();}catch(e){await reloadActivePlaylist();showToast(e.message);}finally{state.dragId=null;}});
+ document.addEventListener("dragend",()=>{state.dragId=null;document.querySelectorAll(".dragging,.drag-over").forEach(el=>el.classList.remove("dragging","drag-over"));});
+ $("seek").addEventListener("input",()=>{if(Number.isFinite(audio.duration)&&audio.duration>0)audio.currentTime=(Number($("seek").value)/1000)*audio.duration;});
+ audio.addEventListener("timeupdate",()=>{const p=audio.duration?audio.currentTime/audio.duration:0;$("miniProgress").style.width=`${p*100}%`;$("seek").value=String(Math.round(p*1000));$("elapsed").textContent=shortTime(audio.currentTime);$("remaining").textContent=`-${shortTime((audio.duration||0)-audio.currentTime)}`;});
+ audio.addEventListener("play",updatePlayer);audio.addEventListener("pause",updatePlayer);audio.addEventListener("ended",()=>{if(state.repeat){audio.currentTime=0;audio.play().catch(()=>{});}else nextTrack();});audio.addEventListener("error",()=>showToast("This stream is unavailable. Try playing the song again."));
+ async function boot(){
+  if(!initData){document.querySelector("main").innerHTML='<div class="empty" style="margin-top:40px">Open Taalune from the Telegram bot to sign in securely.</div>';document.querySelector(".bottom-nav").style.display="none";return;}
+  try{await loadProfile();await loadHome();}catch(e){showToast(e.message);}
+ }
+ boot();
+})();
+</script>
+</body>
+</html>

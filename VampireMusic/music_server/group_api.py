@@ -1,3 +1,4 @@
+
 """Authenticated Telegram voice-chat controls for the Taalune Mini App."""
 
 from __future__ import annotations
@@ -9,7 +10,13 @@ from typing import Any
 
 from aiohttp import web
 
-from VampireMusic import app, config, db, VampireMusic, queue
+from VampireMusic import (
+    app,
+    config,
+    db,
+    queue,
+    VampireMusic,
+)
 from VampireMusic.core.youtube import VIDEO_ID_RE
 from VampireMusic.helpers._dataclass import Track
 from VampireMusic.music_server.social import (
@@ -57,7 +64,18 @@ class GroupAPI:
             "administrator",
             "member",
             "restricted",
-}
+        }
+
+    @staticmethod
+    def _is_sudo(user_id: int) -> bool:
+        """
+        app.sudoers is Pyrogram's filters.user set-based filter.
+        It supports membership checks and is populated at bot startup.
+        """
+        try:
+            return int(user_id) in app.sudoers
+        except (TypeError, AttributeError):
+            return False
 
     async def _context(
         self,
@@ -76,6 +94,7 @@ class GroupAPI:
         if chat_id >= 0:
             raise APIError("group_only", 400)
 
+        # The bot itself must be able to access the selected group.
         try:
             chat = await app.get_chat(chat_id)
         except Exception:
@@ -88,6 +107,7 @@ class GroupAPI:
         if chat_type != "supergroup":
             raise APIError("supergroup_required", 400)
 
+        # Resolve the assistant assigned to this specific group.
         try:
             assistant = await db.get_client(chat_id)
         except Exception:
@@ -96,7 +116,7 @@ class GroupAPI:
         if assistant is None:
             raise APIError("assistant_unavailable", 503)
 
-        # Verify the requesting user through the assigned userbot.
+        # Always verify the requesting user is a member of this group.
         try:
             user_member = await assistant.get_chat_member(
                 chat_id,
@@ -111,12 +131,13 @@ class GroupAPI:
         if not self._is_member(user_member):
             raise APIError("not_group_member", 403)
 
-        # Verify that the bot and assigned assistant are still in this group.
+        # Verify both playback clients are still members.
         try:
             bot_member = await app.get_chat_member(
                 chat_id,
                 app.id,
             )
+
             assistant_member = await assistant.get_chat_member(
                 chat_id,
                 assistant.id,
@@ -133,17 +154,25 @@ class GroupAPI:
         if not self._is_member(assistant_member):
             raise APIError("assistant_not_in_group", 409)
 
-        status = self._status(user_member)
-        is_admin = status in {"administrator", "creator", "owner"}
+        user_status = self._status(user_member)
 
-        # Bot.sudoers is a Pyrogram filter, NOT a list of user IDs.
+        is_group_admin = user_status in {
+            "administrator",
+            "creator",
+            "owner",
+        }
+
+        # Bot's global owner and SUDO access.
         owner_id = int(
             getattr(app, "owner", 0)
             or getattr(config, "OWNER_ID", 0)
             or 0
         )
-        is_bot_owner = user_id == owner_id
 
+        is_bot_owner = user_id == owner_id
+        is_sudo = self._is_sudo(user_id)
+
+        # Group-specific authorization from the existing database.
         try:
             is_authorized = await db.is_auth(
                 chat_id,
@@ -153,9 +182,10 @@ class GroupAPI:
             raise APIError("authorization_check_failed", 503)
 
         can_control = (
-            is_admin
+            is_group_admin
             or is_authorized
             or is_bot_owner
+            or is_sudo
         )
 
         if require_control and not can_control:
@@ -168,9 +198,11 @@ class GroupAPI:
             "chat_id": chat_id,
             "chat": chat,
             "user_id": user_id,
-            "user_status": status,
+            "user_status": user_status,
             "assistant": assistant,
             "can_control": can_control,
+            "is_bot_owner": is_bot_owner,
+            "is_sudo": is_sudo,
         }
 
     @staticmethod
@@ -225,6 +257,7 @@ class GroupAPI:
             160,
             allow_empty=False,
         )
+
         artist = clean_text(
             data.get("artist", "Unknown artist"),
             160,
@@ -251,6 +284,13 @@ class GroupAPI:
             user=requester,
             video=False,
         )
+
+    @staticmethod
+    def _queue_limit() -> int:
+        try:
+            return max(1, min(int(config.QUEUE_LIMIT), 500))
+        except (TypeError, ValueError, AttributeError):
+            return 100
 
     async def _start_media(
         self,
@@ -286,10 +326,7 @@ class GroupAPI:
                 queue.add(chat_id, media)
 
             else:
-                limit = int(
-                    getattr(config, "QUEUE_LIMIT", 100)
-                    or 100
-                )
+                limit = self._queue_limit()
 
                 if len(queue.get_queue(chat_id)) >= limit:
                     raise APIError("group_queue_limit", 409)
@@ -342,10 +379,7 @@ class GroupAPI:
             for track in tracks
         ]
 
-        limit = int(
-            getattr(config, "QUEUE_LIMIT", 100)
-            or 100
-        )
+        limit = self._queue_limit()
 
         if len(medias) > limit:
             raise APIError("group_queue_limit", 409)
@@ -386,8 +420,8 @@ class GroupAPI:
                     except Exception:
                         pass
 
-                # First playlist track becomes the new current track.
-                # Existing upcoming tracks remain after this playlist.
+                # New playlist becomes current; existing upcoming tracks
+                # remain behind the new playlist.
                 queue.queues[chat_id] = deque([
                     *medias,
                     *pending,
@@ -426,12 +460,12 @@ class GroupAPI:
             }
 
     async def status(self, request: web.Request):
-        ctx = await self._context(
+        context = await self._context(
             request,
             require_control=False,
         )
 
-        chat_id = ctx["chat_id"]
+        chat_id = context["chat_id"]
         items = queue.get_queue(chat_id)
         current = items[0] if items else None
 
@@ -443,18 +477,18 @@ class GroupAPI:
             "group": {
                 "chat_id": chat_id,
                 "title": getattr(
-                    ctx["chat"],
+                    context["chat"],
                     "title",
                     "Telegram group",
                 ),
                 "username": getattr(
-                    ctx["chat"],
+                    context["chat"],
                     "username",
                     None,
                 ),
-                "user_status": ctx["user_status"],
-                "assistant_id": ctx["assistant"].id,
-                "can_control": ctx["can_control"],
+                "user_status": context["user_status"],
+                "assistant_id": context["assistant"].id,
+                "can_control": context["can_control"],
                 "active": active,
                 "playing": playing,
                 "current": self._track_payload(current),
@@ -467,12 +501,12 @@ class GroupAPI:
         })
 
     async def control(self, request: web.Request):
-        ctx = await self._context(
+        context = await self._context(
             request,
             require_control=True,
         )
 
-        chat_id = ctx["chat_id"]
+        chat_id = context["chat_id"]
         user = request["telegram_user"]
 
         requester = (
@@ -560,7 +594,7 @@ class GroupAPI:
 
             if not await self.social.can_view_playlist(
                 playlist,
-                ctx["user_id"],
+                context["user_id"],
             ):
                 raise APIError("private_playlist", 403)
 
@@ -592,5 +626,4 @@ def register_group_routes(
 
     api = GroupAPI(social_store)
     api.register(application)
-
     return api

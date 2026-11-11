@@ -1,3 +1,4 @@
+
 from pathlib import Path
 
 from pyrogram import filters, types
@@ -176,8 +177,7 @@ async def play_hndlr(
             file,
         )
 
-       
-               if position != 0 or await db.get_call(m.chat.id):
+        if position != 0 or await db.get_call(m.chat.id):
             await sent.edit_text(
                 m.lang["play_queued"].format(
                     position,

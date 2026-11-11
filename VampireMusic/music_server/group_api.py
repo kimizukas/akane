@@ -115,6 +115,7 @@ class GroupAPI:
         if assistant is None:
             raise APIError("assistant_unavailable", 503)
 
+        # Verify the requesting user through the assigned assistant.
         try:
             user_member = await assistant.get_chat_member(
                 chat_id,
@@ -129,6 +130,7 @@ class GroupAPI:
         if not self._is_member(user_member):
             raise APIError("not_group_member", 403)
 
+        # Both playback clients must be members of this group.
         try:
             bot_member = await app.get_chat_member(
                 chat_id,
@@ -325,32 +327,20 @@ class GroupAPI:
         }
 
     async def list_groups(self, request: web.Request):
-        """
-        List groups previously recorded by the bot.
-
-        Each result is returned only after verifying:
-        - The bot can access the group.
-        - The chat is a supergroup.
-        - The requesting Telegram user is a member.
-        - The bot and assigned assistant are members.
-        """
-
         try:
-            raw_limit = int(request.query.get("limit", "20"))
-            raw_offset = int(request.query.get("offset", "0"))
+            limit = int(request.query.get("limit", "20"))
+            offset = int(request.query.get("offset", "0"))
         except (TypeError, ValueError):
             raise APIError("invalid_pagination", 400)
 
-        limit = max(1, min(raw_limit, 20))
-        offset = max(0, min(raw_offset, 10000))
+        limit = max(1, min(limit, 20))
+        offset = max(0, min(offset, 10000))
 
         try:
             saved_chat_ids = await db.get_chats()
         except Exception:
             raise APIError("group_list_unavailable", 503)
 
-        # Only negative IDs are group/supergroup candidates.
-        # Reverse insertion order to show recently recorded groups first.
         candidates = []
         seen = set()
 
@@ -367,7 +357,6 @@ class GroupAPI:
             candidates.append(chat_id)
 
         page_ids = candidates[offset:offset + limit]
-
         semaphore = asyncio.Semaphore(3)
 
         async def inspect_group(chat_id: int):
@@ -389,6 +378,9 @@ class GroupAPI:
         groups = []
 
         for context in checked:
+            if isinstance(context, asyncio.CancelledError):
+                raise context
+
             if isinstance(context, BaseException):
                 continue
 
@@ -396,6 +388,8 @@ class GroupAPI:
                 groups.append(
                     await self._group_payload(context)
                 )
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 continue
 
@@ -441,24 +435,26 @@ class GroupAPI:
                     queue.clear(chat_id)
                     queue.add(chat_id, media)
 
-            elif not active:
-                queue.clear(chat_id)
-                queue.add(chat_id, media)
+            elif mode == "queue":
+                if not active:
+                    queue.clear(chat_id)
+                    queue.add(chat_id, media)
+
+                else:
+                    if len(queue.get_queue(chat_id)) >= self._queue_limit():
+                        raise APIError("group_queue_limit", 409)
+
+                    position = queue.add(chat_id, media)
+
+                    VampireMusic.schedule_prefetch(chat_id)
+
+                    return {
+                        "status": "queued",
+                        "position": position,
+                    }
 
             else:
-                limit = self._queue_limit()
-
-                if len(queue.get_queue(chat_id)) >= limit:
-                    raise APIError("group_queue_limit", 409)
-
-                position = queue.add(chat_id, media)
-
-                VampireMusic.schedule_prefetch(chat_id)
-
-                return {
-                    "status": "queued",
-                    "position": position,
-                }
+                raise APIError("unsupported_group_action", 400)
 
             notice = await app.send_message(
                 chat_id,
@@ -549,11 +545,31 @@ class GroupAPI:
                     *pending,
                 ])
 
-            else:
+            elif mode == "play_now":
                 queue.clear(chat_id)
 
                 for media in medias:
                     queue.add(chat_id, media)
+
+            elif mode == "queue":
+                if len(existing) + len(medias) > limit:
+                    raise APIError("group_queue_limit", 409)
+
+                positions = [
+                    queue.add(chat_id, media)
+                    for media in medias
+                ]
+
+                VampireMusic.schedule_prefetch(chat_id)
+
+                return {
+                    "status": "queued",
+                    "added": len(medias),
+                    "first_position": positions[0],
+                }
+
+            else:
+                raise APIError("unsupported_group_action", 400)
 
             notice = await app.send_message(
                 chat_id,
@@ -589,8 +605,8 @@ class GroupAPI:
 
         chat_id = context["chat_id"]
 
-        # A manually connected and verified group should also become
-        # discoverable on the next Mini App load.
+        # A manually connected, verified group becomes discoverable
+        # on the next Mini App load.
         try:
             if not await db.is_chat(chat_id):
                 await db.add_chat(chat_id)

@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -31,6 +30,10 @@ class GroupAPI:
         self._locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     def register(self, application: web.Application) -> None:
+        application.router.add_get(
+            "/api/groups",
+            self.list_groups,
+        )
         application.router.add_get(
             "/api/groups/{chat_id}/status",
             self.status,
@@ -66,10 +69,6 @@ class GroupAPI:
 
     @staticmethod
     def _is_sudo(user_id: int) -> bool:
-        """
-        app.sudoers is Pyrogram's filters.user set-based filter.
-        It supports membership checks and is populated at bot startup.
-        """
         try:
             return int(user_id) in app.sudoers
         except (TypeError, AttributeError):
@@ -80,19 +79,22 @@ class GroupAPI:
         request: web.Request,
         *,
         require_control: bool,
+        chat_id: int | None = None,
     ) -> dict[str, Any]:
 
         user_id = int(request["telegram_user"]["id"])
 
         try:
-            chat_id = int(request.match_info["chat_id"])
-        except (TypeError, ValueError):
+            if chat_id is None:
+                chat_id = int(request.match_info["chat_id"])
+            else:
+                chat_id = int(chat_id)
+        except (TypeError, ValueError, KeyError):
             raise APIError("invalid_chat_id", 400)
 
         if chat_id >= 0:
             raise APIError("group_only", 400)
 
-        # The bot itself must be able to access the selected group.
         try:
             chat = await app.get_chat(chat_id)
         except Exception:
@@ -105,7 +107,6 @@ class GroupAPI:
         if chat_type != "supergroup":
             raise APIError("supergroup_required", 400)
 
-        # Resolve the assistant assigned to this specific group.
         try:
             assistant = await db.get_client(chat_id)
         except Exception:
@@ -114,7 +115,6 @@ class GroupAPI:
         if assistant is None:
             raise APIError("assistant_unavailable", 503)
 
-        # Always verify the requesting user is a member of this group.
         try:
             user_member = await assistant.get_chat_member(
                 chat_id,
@@ -129,7 +129,6 @@ class GroupAPI:
         if not self._is_member(user_member):
             raise APIError("not_group_member", 403)
 
-        # Verify both playback clients are still members.
         try:
             bot_member = await app.get_chat_member(
                 chat_id,
@@ -160,7 +159,6 @@ class GroupAPI:
             "owner",
         }
 
-        # Bot's global owner and SUDO access.
         owner_id = int(
             getattr(app, "owner", 0)
             or getattr(config, "OWNER_ID", 0)
@@ -170,7 +168,6 @@ class GroupAPI:
         is_bot_owner = user_id == owner_id
         is_sudo = self._is_sudo(user_id)
 
-        # Group-specific authorization from the existing database.
         try:
             is_authorized = await db.is_auth(
                 chat_id,
@@ -290,6 +287,131 @@ class GroupAPI:
         except (TypeError, ValueError, AttributeError):
             return 100
 
+    async def _group_payload(
+        self,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+
+        chat_id = context["chat_id"]
+        items = queue.get_queue(chat_id)
+        current = items[0] if items else None
+
+        active = await db.get_call(chat_id)
+        playing = await db.playing(chat_id) if active else False
+
+        return {
+            "chat_id": chat_id,
+            "title": getattr(
+                context["chat"],
+                "title",
+                "Telegram group",
+            ),
+            "username": getattr(
+                context["chat"],
+                "username",
+                None,
+            ),
+            "user_status": context["user_status"],
+            "assistant_id": context["assistant"].id,
+            "can_control": context["can_control"],
+            "active": active,
+            "playing": playing,
+            "current": self._track_payload(current),
+            "queue": [
+                self._track_payload(item)
+                for item in items[1:]
+            ],
+            "queue_count": max(0, len(items) - 1),
+        }
+
+    async def list_groups(self, request: web.Request):
+        """
+        List groups previously recorded by the bot.
+
+        Each result is returned only after verifying:
+        - The bot can access the group.
+        - The chat is a supergroup.
+        - The requesting Telegram user is a member.
+        - The bot and assigned assistant are members.
+        """
+
+        try:
+            raw_limit = int(request.query.get("limit", "20"))
+            raw_offset = int(request.query.get("offset", "0"))
+        except (TypeError, ValueError):
+            raise APIError("invalid_pagination", 400)
+
+        limit = max(1, min(raw_limit, 20))
+        offset = max(0, min(raw_offset, 10000))
+
+        try:
+            saved_chat_ids = await db.get_chats()
+        except Exception:
+            raise APIError("group_list_unavailable", 503)
+
+        # Only negative IDs are group/supergroup candidates.
+        # Reverse insertion order to show recently recorded groups first.
+        candidates = []
+        seen = set()
+
+        for raw_id in reversed(saved_chat_ids):
+            try:
+                chat_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+
+            if chat_id >= 0 or chat_id in seen:
+                continue
+
+            seen.add(chat_id)
+            candidates.append(chat_id)
+
+        page_ids = candidates[offset:offset + limit]
+
+        semaphore = asyncio.Semaphore(3)
+
+        async def inspect_group(chat_id: int):
+            async with semaphore:
+                return await self._context(
+                    request,
+                    require_control=False,
+                    chat_id=chat_id,
+                )
+
+        checked = await asyncio.gather(
+            *[
+                inspect_group(chat_id)
+                for chat_id in page_ids
+            ],
+            return_exceptions=True,
+        )
+
+        groups = []
+
+        for context in checked:
+            if isinstance(context, BaseException):
+                continue
+
+            try:
+                groups.append(
+                    await self._group_payload(context)
+                )
+            except Exception:
+                continue
+
+        next_offset = (
+            offset + len(page_ids)
+            if offset + len(page_ids) < len(candidates)
+            else None
+        )
+
+        return web.json_response({
+            "ok": True,
+            "groups": groups,
+            "count": len(groups),
+            "next_offset": next_offset,
+        })
+
     async def _start_media(
         self,
         chat_id: int,
@@ -297,6 +419,7 @@ class GroupAPI:
         *,
         mode: str,
     ) -> dict[str, Any]:
+
         async with self._locks[chat_id]:
             active = await db.get_call(chat_id)
             current = queue.get_current(chat_id)
@@ -369,6 +492,7 @@ class GroupAPI:
         requester: str,
         mode: str,
     ) -> dict[str, Any]:
+
         if not tracks:
             raise APIError("playlist_empty", 409)
 
@@ -420,8 +544,6 @@ class GroupAPI:
                     except Exception:
                         pass
 
-                # New playlist becomes current; existing upcoming tracks
-                # remain behind the new playlist.
                 queue.queues[chat_id] = deque([
                     *medias,
                     *pending,
@@ -466,38 +588,18 @@ class GroupAPI:
         )
 
         chat_id = context["chat_id"]
-        items = queue.get_queue(chat_id)
-        current = items[0] if items else None
 
-        active = await db.get_call(chat_id)
-        playing = await db.playing(chat_id) if active else False
+        # A manually connected and verified group should also become
+        # discoverable on the next Mini App load.
+        try:
+            if not await db.is_chat(chat_id):
+                await db.add_chat(chat_id)
+        except Exception:
+            pass
 
         return web.json_response({
             "ok": True,
-            "group": {
-                "chat_id": chat_id,
-                "title": getattr(
-                    context["chat"],
-                    "title",
-                    "Telegram group",
-                ),
-                "username": getattr(
-                    context["chat"],
-                    "username",
-                    None,
-                ),
-                "user_status": context["user_status"],
-                "assistant_id": context["assistant"].id,
-                "can_control": context["can_control"],
-                "active": active,
-                "playing": playing,
-                "current": self._track_payload(current),
-                "queue": [
-                    self._track_payload(item)
-                    for item in items[1:]
-                ],
-                "queue_count": max(0, len(items) - 1),
-            },
+            "group": await self._group_payload(context),
         })
 
     async def control(self, request: web.Request):

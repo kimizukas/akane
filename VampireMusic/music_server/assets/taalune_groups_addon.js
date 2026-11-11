@@ -1,3 +1,4 @@
+
 (() => {
   "use strict";
 
@@ -74,6 +75,7 @@
 
   function toast(message) {
     const element = $("toast");
+
     if (element) {
       element.textContent = String(message || "Something went wrong.");
       element.classList.add("show");
@@ -81,6 +83,7 @@
       toast._timer = setTimeout(() => element.classList.remove("show"), 2800);
       return;
     }
+
     window.alert(String(message || "Something went wrong."));
   }
 
@@ -94,11 +97,16 @@
       ...(options.headers || {})
     };
 
-    if (options.body && !(options.body instanceof FormData) && !headers["Content-Type"]) {
+    if (
+      options.body &&
+      !(options.body instanceof FormData) &&
+      !headers["Content-Type"]
+    ) {
       headers["Content-Type"] = "application/json";
     }
 
     let response;
+
     try {
       response = await fetch(path, { ...options, headers });
     } catch (error) {
@@ -108,12 +116,16 @@
 
     let data = {};
     const contentType = response.headers.get("content-type") || "";
+
     if (contentType.includes("application/json")) {
-      try { data = await response.json(); } catch (_) {}
+      try {
+        data = await response.json();
+      } catch (_) {}
     }
 
     if (!response.ok || data.ok === false) {
       const code = data.error || "";
+
       throw new Error(
         API_MESSAGES[code] ||
         data.message ||
@@ -130,6 +142,7 @@
 
     const style = document.createElement("style");
     style.id = "taaluneGroupPlayerStyles";
+
     style.textContent = `
       #page-groups .tp-group-intro{margin:8px 0 16px;color:var(--muted);font-size:11px;line-height:1.65}
       #page-groups .tp-connect{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;align-items:end;padding:13px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.025)}
@@ -164,40 +177,61 @@
       [data-tp-group-button] svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
       [data-action="group-play-track"],[data-action="group-track"]{display:none!important}
       .tp-sheet-note{padding:11px 12px;border:1px solid var(--line);border-radius:11px;background:rgba(255,255,255,.035);color:var(--muted);font-size:11px;line-height:1.55}
-      #miniCover,#fullCover,.mini-cover,.player-art{transform:none!important;animation:none!important;transition:opacity .16s ease!important;will-change:auto!important}
-      .player-art-wrap{transform:none!important}
-      #fullPlayer.open{animation:tp-player-fade .2s ease both!important}
-      @keyframes tp-player-fade{from{opacity:0}to{opacity:1}}
       @media(max-width:480px){#page-groups .tp-connect{grid-template-columns:minmax(0,1fr)}#page-groups .tp-group-card{padding:12px}}
     `;
+
     document.head.appendChild(style);
   }
 
   function preventSameImageReload() {
-    const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
-    if (!descriptor?.get || !descriptor?.set || !descriptor.configurable) return;
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLImageElement.prototype,
+      "src"
+    );
+
+    if (
+      !descriptor?.get ||
+      !descriptor?.set ||
+      !descriptor.configurable
+    ) {
+      return;
+    }
+
     if (window.__taaluneImageSrcPatched) return;
     window.__taaluneImageSrcPatched = true;
 
     Object.defineProperty(HTMLImageElement.prototype, "src", {
       configurable: true,
       enumerable: descriptor.enumerable,
+
       get() {
         return descriptor.get.call(this);
       },
+
       set(value) {
         const next = String(value ?? "");
         const current = this.getAttribute("src") || "";
+
         if (!next && !current) return;
+
         if (next && current) {
           try {
-            const oldUrl = new URL(descriptor.get.call(this), document.baseURI).href;
-            const newUrl = new URL(next, document.baseURI).href;
+            const oldUrl = new URL(
+              descriptor.get.call(this),
+              document.baseURI
+            ).href;
+
+            const newUrl = new URL(
+              next,
+              document.baseURI
+            ).href;
+
             if (oldUrl === newUrl) return;
           } catch (_) {
             if (current === next) return;
           }
         }
+
         descriptor.set.call(this, next);
       }
     });
@@ -208,17 +242,28 @@
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const rest = seconds % 60;
-    if (hours) return `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+
+    if (hours) {
+      return `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+    }
+
     return `${minutes}:${String(rest).padStart(2, "0")}`;
   }
 
   function parseDuration(text) {
     const value = String(text || "").trim();
     const match = /^(\d{1,3}):(\d{2})(?::(\d{2}))?$/.exec(value);
+
     if (!match) return 0;
+
     if (match[3] !== undefined) {
-      return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+      return (
+        Number(match[1]) * 3600 +
+        Number(match[2]) * 60 +
+        Number(match[3])
+      );
     }
+
     return Number(match[1]) * 60 + Number(match[2]);
   }
 
@@ -227,13 +272,18 @@
   }
 
   function selectedGroup() {
-    return state.selectedGroupId ? groupById(state.selectedGroupId) : null;
+    return state.selectedGroupId
+      ? groupById(state.selectedGroupId)
+      : null;
   }
 
   function saveSelectedGroup() {
     try {
       if (state.selectedGroupId) {
-        localStorage.setItem(selectedStorageKey, String(state.selectedGroupId));
+        localStorage.setItem(
+          selectedStorageKey,
+          String(state.selectedGroupId)
+        );
       } else {
         localStorage.removeItem(selectedStorageKey);
       }
@@ -242,12 +292,18 @@
 
   function setSelectedGroup(chatId) {
     const group = groupById(chatId);
-    if (!group) throw new Error("This group is no longer available.");
+
+    if (!group) {
+      throw new Error("This group is no longer available.");
+    }
+
     state.selectedGroupId = String(group.chat_id);
     saveSelectedGroup();
+
     renderGroupCards();
     enhanceTrackRows();
     enhancePlaylistActions();
+
     toast(`Selected ${group.title || "Telegram group"}`);
   }
 
@@ -258,46 +314,66 @@
       authorized: "Authorized by /auth",
       view_only: "Member · view only"
     };
+
     return roles[group.access_role] || "Member";
   }
 
   function groupCardHTML(group) {
     const id = String(group.chat_id);
     const selected = id === String(state.selectedGroupId || "");
+
     const statusClass = group.active
       ? (group.playing ? "playing" : "paused")
       : "";
+
     const statusText = group.active
       ? (group.playing ? "Playing" : "Paused")
       : "Idle";
+
     const current = group.current;
-    const currentHTML = current ? `
-      <div class="tp-current">
-        ${current.thumbnail ? `<img src="${esc(current.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<div class="track-cover cover-placeholder">♪</div>`}
-        <div class="tp-current-copy">
-          <div class="tp-current-title">${esc(current.title)}</div>
-          <div class="tp-current-sub">${esc(current.artist || "Unknown artist")} · ${formatTime(current.duration_sec)}</div>
-        </div>
-      </div>
-    ` : `<div class="tp-note">Nothing is playing in this group.</div>`;
 
-    const queueHTML = (group.queue || []).slice(0, 4).map((track, index) => `
-      <div class="tp-queue-row">
-        <span class="muted small">${index + 1}</span>
-        <div class="tp-queue-name">
-          ${esc(track.title)}
-          <div class="tp-queue-sub">${esc(track.artist || "Unknown artist")} · ${formatTime(track.duration_sec)}</div>
+    const currentHTML = current
+      ? `
+        <div class="tp-current">
+          ${
+            current.thumbnail
+              ? `<img src="${esc(current.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+              : `<div class="track-cover cover-placeholder">♪</div>`
+          }
+          <div class="tp-current-copy">
+            <div class="tp-current-title">${esc(current.title)}</div>
+            <div class="tp-current-sub">${esc(current.artist || "Unknown artist")} · ${formatTime(current.duration_sec)}</div>
+          </div>
         </div>
-      </div>
-    `).join("");
+      `
+      : `<div class="tp-note">Nothing is playing in this group.</div>`;
 
-    const controls = group.can_control ? (group.active ? `
-      <button class="secondary-button" data-tp-action="control" data-chat-id="${esc(id)}" data-command="${group.playing ? "pause" : "resume"}">${group.playing ? "Ⅱ Pause" : "▶ Resume"}</button>
-      <button class="secondary-button" data-tp-action="control" data-chat-id="${esc(id)}" data-command="skip">Next</button>
-      <button class="danger-button" data-tp-action="control" data-chat-id="${esc(id)}" data-command="stop">Stop</button>
-    ` : `<span class="tp-note">Select this group, then send a song or playlist to start group playback.</span>`) : `
-      <span class="tp-note">View-only access. Playback control requires group admin or /auth permission.</span>
-    `;
+    const queueHTML = (group.queue || [])
+      .slice(0, 4)
+      .map((track, index) => `
+        <div class="tp-queue-row">
+          <span class="muted small">${index + 1}</span>
+          <div class="tp-queue-name">
+            ${esc(track.title)}
+            <div class="tp-queue-sub">${esc(track.artist || "Unknown artist")} · ${formatTime(track.duration_sec)}</div>
+          </div>
+        </div>
+      `)
+      .join("");
+
+    const controls = group.can_control
+      ? (
+          group.active
+            ? `
+              <button class="secondary-button" data-tp-action="control" data-chat-id="${esc(id)}" data-command="${group.playing ? "pause" : "resume"}">${group.playing ? "Ⅱ Pause" : "▶ Resume"}</button>
+              <button class="secondary-button" data-tp-action="control" data-chat-id="${esc(id)}" data-command="skip">Next</button>
+              <button class="danger-button" data-tp-action="control" data-chat-id="${esc(id)}" data-command="stop">Stop</button>
+            `
+            : `<span class="tp-note">Select this group, then send a song or playlist to start group playback.</span>`
+        )
+      : `
+          <span class="tp-note">View-only access. Playback control requires group admin or /auth permission.</span>
+        `;
 
     return `
       <article class="tp-group-card ${selected ? "selected" : ""}" data-tp-group-card="${esc(id)}">
@@ -334,11 +410,25 @@
     if (!target) return;
 
     target.innerHTML = state.groups.size
-      ? Array.from(state.groups.values()).map(groupCardHTML).join("")
-      : `<div class="empty">${state.loading ? "Loading your groups…" : "No accessible groups found. Add the music bot and its assigned assistant to a group, then connect it by ID."}</div>`;
+      ? Array.from(state.groups.values())
+          .map(groupCardHTML)
+          .join("")
+      : `
+          <div class="empty">
+            ${
+              state.loading
+                ? "Loading your groups…"
+                : "No accessible groups found. Add the music bot and its assigned assistant to a group, then connect it by ID."
+            }
+          </div>
+        `;
 
     const more = $("tpLoadMore");
-    if (more) more.hidden = state.nextOffset === null;
+
+    if (more) {
+      more.hidden = state.nextOffset === null;
+    }
+
     enhanceTrackRows();
     enhancePlaylistActions();
   }
@@ -350,24 +440,53 @@
     page.innerHTML = `
       <div class="eyebrow">TELEGRAM VOICE CHATS</div>
       <h1 class="page-title">Group player</h1>
-      <p class="tp-group-intro">Every Telegram group has its own voice-chat session and queue. Personal listening stays separate. Only group members can see a group; configured bot owner and sudo users can access saved groups.</p>
+
+      <p class="tp-group-intro">
+        Every Telegram group has its own voice-chat session and queue.
+        Personal listening stays separate. Only group members can see a group;
+        configured bot owner and sudo users can access saved groups.
+      </p>
 
       <div class="tp-connect">
         <div class="field">
           <label for="tpGroupId">CONNECT A GROUP BY ID</label>
-          <input id="tpGroupId" inputmode="numeric" maxlength="20" placeholder="Supergroup ID · -100…">
+          <input
+            id="tpGroupId"
+            inputmode="numeric"
+            maxlength="20"
+            placeholder="Supergroup ID · -100…"
+          >
         </div>
-        <button class="primary-button" data-tp-action="connect-group">Connect group</button>
+
+        <button class="primary-button" data-tp-action="connect-group">
+          Connect group
+        </button>
       </div>
 
       <div class="tp-heading">
         <h2>Your groups</h2>
-        <button class="secondary-button" data-tp-action="reload-groups">↻ Reload</button>
+        <button class="secondary-button" data-tp-action="reload-groups">
+          ↻ Reload
+        </button>
       </div>
 
-      <div class="muted small">You can view the queue as a member. Playback controls require administrator or authorization permissions.</div>
-      <div id="tpGroupCards" class="tp-groups"><div class="empty">Loading your groups…</div></div>
-      <button id="tpLoadMore" class="secondary-button tp-load-more" data-tp-action="load-more" hidden>Load more groups</button>
+      <div class="muted small">
+        You can view the queue as a member.
+        Playback controls require administrator or authorization permissions.
+      </div>
+
+      <div id="tpGroupCards" class="tp-groups">
+        <div class="empty">Loading your groups…</div>
+      </div>
+
+      <button
+        id="tpLoadMore"
+        class="secondary-button tp-load-more"
+        data-tp-action="load-more"
+        hidden
+      >
+        Load more groups
+      </button>
     `;
 
     renderGroupCards();
@@ -377,80 +496,131 @@
     document.querySelectorAll(".page").forEach(page => {
       page.classList.toggle("active", page.id === "page-groups");
     });
+
     document.querySelectorAll(".nav-button").forEach(button => {
-      button.classList.toggle("active", button.dataset.page === "groups");
+      button.classList.toggle(
+        "active",
+        button.dataset.page === "groups"
+      );
     });
+
     window.scrollTo({ top: 0, behavior: "auto" });
+
     renderGroupsPage();
-    if (!state.loaded && !state.loading) loadGroups(true);
+
+    if (!state.loaded && !state.loading) {
+      loadGroups(true);
+    }
   }
 
   function upsertGroup(group) {
     if (!group || group.chat_id === undefined) return null;
+
     const id = String(group.chat_id);
     state.groups.set(id, group);
+
     return group;
   }
 
   function updateGroupCard(group) {
     const id = String(group.chat_id);
     const signature = JSON.stringify(group);
+
     if (state.signatures.get(id) === signature) return;
+
     state.signatures.set(id, signature);
 
-    const current = document.querySelector(`[data-tp-group-card="${CSS.escape(id)}"]`);
+    const current = document.querySelector(
+      `[data-tp-group-card="${CSS.escape(id)}"]`
+    );
+
     if (current) {
       current.outerHTML = groupCardHTML(group);
     } else if ($("tpGroupCards")) {
       renderGroupCards();
     }
+
     enhanceTrackRows();
     enhancePlaylistActions();
   }
 
   async function loadGroups(reset = false) {
     if (state.loading) return;
+
     const offset = reset ? 0 : state.nextOffset;
+
     if (!reset && offset === null) return;
 
     state.loading = true;
+
     if (reset) {
       state.groups.clear();
       state.signatures.clear();
       state.nextOffset = 0;
     }
+
     renderGroupCards();
 
     try {
-      const data = await api(`/api/groups?limit=20&offset=${Number(offset) || 0}`);
-      for (const group of (Array.isArray(data.groups) ? data.groups : [])) {
+      const data = await api(
+        `/api/groups?limit=20&offset=${Number(offset) || 0}`
+      );
+
+      for (const group of (
+        Array.isArray(data.groups) ? data.groups : []
+      )) {
         upsertGroup(group);
       }
-      state.nextOffset = data.next_offset === null || data.next_offset === undefined
-        ? null
-        : Number(data.next_offset);
+
+      state.nextOffset =
+        data.next_offset === null || data.next_offset === undefined
+          ? null
+          : Number(data.next_offset);
+
       state.loaded = true;
 
-      if (state.selectedGroupId && !groupById(state.selectedGroupId)) {
+      if (
+        state.selectedGroupId &&
+        !groupById(state.selectedGroupId)
+      ) {
         state.selectedGroupId = null;
       }
+
       if (!state.selectedGroupId && state.groups.size) {
-        const preferred = Array.from(state.groups.values()).find(group => group.can_control)
-          || state.groups.values().next().value;
+        const preferred =
+          Array.from(state.groups.values()).find(
+            group => group.can_control
+          ) ||
+          state.groups.values().next().value;
+
         state.selectedGroupId = String(preferred.chat_id);
       }
+
       saveSelectedGroup();
       renderGroupCards();
 
     } catch (error) {
       state.loaded = false;
+
       const target = $("tpGroupCards");
-      if (target) target.innerHTML = `<div class="empty tp-error">${esc(error.message)}</div>`;
+
+      if (target) {
+        target.innerHTML = `
+          <div class="empty tp-error">${esc(error.message)}</div>
+        `;
+      }
+
       toast(error.message);
+
     } finally {
       state.loading = false;
+
       const more = $("tpLoadMore");
-      if (more) more.hidden = state.nextOffset === null;
+
+      if (more) {
+        more.hidden = state.nextOffset === null;
+      }
+
       enhanceTrackRows();
       enhancePlaylistActions();
     }
@@ -459,23 +629,32 @@
   async function connectGroup() {
     const input = $("tpGroupId");
     const raw = input?.value.trim() || "";
+
     if (!/^-100\d{6,13}$/.test(raw)) {
       toast("Enter a valid Telegram supergroup ID starting with -100.");
       return;
     }
+
     const chatId = Number(raw);
+
     if (!Number.isSafeInteger(chatId)) {
       toast("This group ID is not supported.");
       return;
     }
 
     try {
-      const data = await api(`/api/groups/${encodeURIComponent(chatId)}/status`);
+      const data = await api(
+        `/api/groups/${encodeURIComponent(chatId)}/status`
+      );
+
       upsertGroup(data.group);
       state.selectedGroupId = String(chatId);
       saveSelectedGroup();
+
       await loadGroups(true);
+
       toast("Group connected successfully.");
+
     } catch (error) {
       toast(error.message);
     }
@@ -483,45 +662,77 @@
 
   async function refreshGroup(chatId) {
     const id = String(chatId || "");
-    if (!id) throw new Error("Select a group first.");
-    const data = await api(`/api/groups/${encodeURIComponent(id)}/status`);
+
+    if (!id) {
+      throw new Error("Select a group first.");
+    }
+
+    const data = await api(
+      `/api/groups/${encodeURIComponent(id)}/status`
+    );
+
     const group = upsertGroup(data.group);
+
     updateGroupCard(group);
+
     return group;
   }
 
   async function controlGroup(chatId, action, payload = {}) {
     const group = groupById(chatId);
-    if (!group) throw new Error("This group is no longer available.");
-    if (!group.can_control) throw new Error(API_MESSAGES.group_control_permission_denied);
 
-    const result = await api(`/api/groups/${encodeURIComponent(chatId)}/control`, {
-      method: "POST",
-      body: JSON.stringify({ action, ...payload })
-    });
+    if (!group) {
+      throw new Error("This group is no longer available.");
+    }
+
+    if (!group.can_control) {
+      throw new Error(API_MESSAGES.group_control_permission_denied);
+    }
+
+    const result = await api(
+      `/api/groups/${encodeURIComponent(chatId)}/control`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action, ...payload })
+      }
+    );
 
     if (result.status === "queued") {
       const position = result.position ?? result.first_position;
-      toast(`Added to group queue${position !== undefined ? ` · position ${Number(position) + 1}` : ""}`);
+
+      toast(
+        `Added to group queue${
+          position !== undefined
+            ? ` · position ${Number(position) + 1}`
+            : ""
+        }`
+      );
+
     } else if (result.status === "playing") {
       toast("Group playback started.");
+
     } else if (action === "stop") {
       toast("Group playback stopped.");
+
     } else {
       toast("Group playback updated.");
     }
 
     await refreshGroup(chatId);
+
     return result;
   }
 
   function openSheet(title, body, actions) {
     const overlay = $("sheetOverlay");
     if (!overlay) return false;
+
     $("sheetTitle").textContent = title;
     $("sheetBody").innerHTML = body;
     $("sheetActions").innerHTML = actions;
+
     overlay.classList.add("open");
+
     return true;
   }
 
@@ -531,16 +742,42 @@
   }
 
   function trackFromRow(row, fallbackId = "") {
-    if (!row) throw new Error("Song details are unavailable.");
-    const id = String(row.dataset.trackId || fallbackId || "").trim();
-    if (!id) throw new Error("Song details are unavailable.");
+    if (!row) {
+      throw new Error("Song details are unavailable.");
+    }
 
-    const title = row.querySelector(".track-title")?.textContent?.trim() || "Unknown track";
-    const sub = row.querySelector(".track-sub")?.textContent?.trim() || "Unknown artist";
-    const durationMatch = /\s·\s(\d{1,3}:\d{2}(?::\d{2})?)$/.exec(sub);
-    const duration = durationMatch ? durationMatch[1] : "";
-    const artist = durationMatch ? sub.slice(0, durationMatch.index).trim() : sub;
-    const thumbnail = row.querySelector("img.track-cover")?.getAttribute("src") || null;
+    const id = String(
+      row.dataset.trackId ||
+      fallbackId ||
+      ""
+    ).trim();
+
+    if (!id) {
+      throw new Error("Song details are unavailable.");
+    }
+
+    const title =
+      row.querySelector(".track-title")?.textContent?.trim() ||
+      "Unknown track";
+
+    const sub =
+      row.querySelector(".track-sub")?.textContent?.trim() ||
+      "Unknown artist";
+
+    const durationMatch =
+      /\s·\s(\d{1,3}:\d{2}(?::\d{2})?)$/.exec(sub);
+
+    const duration = durationMatch
+      ? durationMatch[1]
+      : "";
+
+    const artist = durationMatch
+      ? sub.slice(0, durationMatch.index).trim()
+      : sub;
+
+    const thumbnail =
+      row.querySelector("img.track-cover")?.getAttribute("src") ||
+      null;
 
     return {
       id,
@@ -553,26 +790,50 @@
 
   function openTrackActions(track) {
     const group = selectedGroup();
-    if (!group) throw new Error("Select a Telegram group first.");
-    if (!group.can_control) throw new Error(API_MESSAGES.group_control_permission_denied);
+
+    if (!group) {
+      throw new Error("Select a Telegram group first.");
+    }
+
+    if (!group.can_control) {
+      throw new Error(API_MESSAGES.group_control_permission_denied);
+    }
+
     state.pendingTrack = track;
 
     openSheet(
       "Send to group",
       `
         <div class="track-row">
-          ${track.thumbnail ? `<img class="track-cover" src="${esc(track.thumbnail)}" alt="">` : `<div class="track-cover cover-placeholder">♪</div>`}
+          ${
+            track.thumbnail
+              ? `<img class="track-cover" src="${esc(track.thumbnail)}" alt="">`
+              : `<div class="track-cover cover-placeholder">♪</div>`
+          }
+
           <div class="track-copy">
             <div class="track-title">${esc(track.title)}</div>
             <div class="track-sub">${esc(track.artist)}</div>
           </div>
         </div>
-        <div class="tp-sheet-note">Target group: <strong>${esc(group.title || group.chat_id)}</strong></div>
+
+        <div class="tp-sheet-note">
+          Target group:
+          <strong>${esc(group.title || group.chat_id)}</strong>
+        </div>
       `,
       `
-        <button class="secondary-button" data-tp-action="close-sheet">Cancel</button>
-        <button class="secondary-button" data-tp-action="queue-track">＋ Queue</button>
-        <button class="primary-button" data-tp-action="play-track">▶ Play now</button>
+        <button class="secondary-button" data-tp-action="close-sheet">
+          Cancel
+        </button>
+
+        <button class="secondary-button" data-tp-action="queue-track">
+          ＋ Queue
+        </button>
+
+        <button class="primary-button" data-tp-action="play-track">
+          ▶ Play now
+        </button>
       `
     );
   }
@@ -580,8 +841,13 @@
   async function playTrackInGroup(mode) {
     const track = state.pendingTrack;
     const group = selectedGroup();
-    if (!track || !group) throw new Error("Song or selected group is unavailable.");
+
+    if (!track || !group) {
+      throw new Error("Song or selected group is unavailable.");
+    }
+
     closeSheet();
+
     await controlGroup(
       String(group.chat_id),
       mode === "play" ? "play_track" : "queue_track",
@@ -591,78 +857,162 @@
 
   function enhanceTrackRows(root = document) {
     const rows = [];
-    if (root instanceof Element && root.matches(".track-row[data-track-id]")) rows.push(root);
-    if (root.querySelectorAll) rows.push(...root.querySelectorAll(".track-row[data-track-id]"));
+
+    if (
+      root instanceof Element &&
+      root.matches(".track-row[data-track-id]")
+    ) {
+      rows.push(root);
+    }
+
+    if (root.querySelectorAll) {
+      rows.push(
+        ...root.querySelectorAll(".track-row[data-track-id]")
+      );
+    }
 
     const group = selectedGroup();
+
     for (const row of rows) {
-      row.querySelectorAll('[data-action="group-play-track"],[data-action="group-track"]').forEach(button => {
+      row.querySelectorAll(
+        '[data-action="group-play-track"],[data-action="group-track"]'
+      ).forEach(button => {
         button.hidden = true;
         button.setAttribute("aria-hidden", "true");
       });
 
       const actions = row.querySelector(".track-actions");
       let button = row.querySelector("[data-tp-group-button]");
+
       if (!actions || !group?.can_control) {
         button?.remove();
         continue;
       }
+
       if (!button) {
         button = document.createElement("button");
         button.type = "button";
         button.className = "track-action";
         button.dataset.tpGroupButton = "true";
         button.dataset.tpAction = "track-menu";
-        button.setAttribute("aria-label", "Send song to selected Telegram group");
+
+        button.setAttribute(
+          "aria-label",
+          "Send song to selected Telegram group"
+        );
+
         button.title = `Send to ${group.title || "selected group"}`;
-        button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>';
-        const personalPlay = actions.querySelector('[data-action="play-track"]');
+
+        button.innerHTML = `
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+        `;
+
+        const personalPlay = actions.querySelector(
+          '[data-action="play-track"]'
+        );
+
         actions.insertBefore(button, personalPlay || null);
       }
+
       button.title = `Send to ${group.title || "selected group"}`;
     }
   }
 
-  function enhancePlaylistActions(root = document) {
+  /*
+   * Playlist controls are now idempotent.
+   * Existing buttons are reused instead of removed and recreated
+   * on every MutationObserver callback.
+   */
+  function enhancePlaylistActions() {
     const page = $("page-playlist");
     if (!page) return;
-    const group = selectedGroup();
+
     const actions = page.querySelector(".detail-actions");
     if (!actions) return;
 
-    actions.querySelectorAll('[data-action="group-play-playlist"],[data-action="group-queue-playlist"]').forEach(button => {
-      button.hidden = true;
-      button.setAttribute("aria-hidden", "true");
+    const group = selectedGroup();
+    const playlistId = String(state.activePlaylistId || "");
+
+    actions.querySelectorAll(
+      '[data-action="group-play-playlist"],[data-action="group-queue-playlist"]'
+    ).forEach(button => {
+      if (!button.hidden) {
+        button.hidden = true;
+      }
+
+      if (button.getAttribute("aria-hidden") !== "true") {
+        button.setAttribute("aria-hidden", "true");
+      }
     });
 
-    actions.querySelectorAll("[data-tp-playlist-action]").forEach(button => button.remove());
-    if (!group?.can_control || !state.activePlaylistId) return;
+    let play = actions.querySelector(
+      '[data-tp-playlist-action="play"]'
+    );
 
-    const play = document.createElement("button");
-    play.type = "button";
-    play.className = "secondary-button";
-    play.dataset.tpAction = "playlist-play";
-    play.dataset.tpPlaylistAction = "true";
-    play.innerHTML = "▶ Play in group";
+    let queueButton = actions.querySelector(
+      '[data-tp-playlist-action="queue"]'
+    );
 
-    const queueButton = document.createElement("button");
-    queueButton.type = "button";
-    queueButton.className = "secondary-button";
-    queueButton.dataset.tpAction = "playlist-queue";
-    queueButton.dataset.tpPlaylistAction = "true";
-    queueButton.innerHTML = "＋ Queue in group";
+    if (!group?.can_control || !playlistId) {
+      play?.remove();
+      queueButton?.remove();
+      return;
+    }
 
-    actions.append(play, queueButton);
+    if (!play) {
+      play = document.createElement("button");
+      play.type = "button";
+      play.className = "secondary-button";
+      play.dataset.tpAction = "playlist-play";
+      play.dataset.tpPlaylistAction = "play";
+      play.textContent = "▶ Play in group";
+
+      actions.appendChild(play);
+    }
+
+    if (!queueButton) {
+      queueButton = document.createElement("button");
+      queueButton.type = "button";
+      queueButton.className = "secondary-button";
+      queueButton.dataset.tpAction = "playlist-queue";
+      queueButton.dataset.tpPlaylistAction = "queue";
+      queueButton.textContent = "＋ Queue in group";
+
+      actions.appendChild(queueButton);
+    }
+
+    if (play.dataset.playlistId !== playlistId) {
+      play.dataset.playlistId = playlistId;
+    }
+
+    if (queueButton.dataset.playlistId !== playlistId) {
+      queueButton.dataset.playlistId = playlistId;
+    }
   }
 
-  async function playPlaylistInGroup(mode) {
+  async function playPlaylistInGroup(
+    mode,
+    requestedPlaylistId = state.activePlaylistId
+  ) {
     const group = selectedGroup();
-    if (!group) throw new Error("Select a Telegram group first.");
-    if (!state.activePlaylistId) throw new Error("Open a playlist first.");
+    const playlistId = String(requestedPlaylistId || "").trim();
+
+    if (!group) {
+      throw new Error("Select a Telegram group first.");
+    }
+
+    if (!playlistId) {
+      throw new Error("Open a playlist first.");
+    }
+
     await controlGroup(
       String(group.chat_id),
       mode === "play" ? "play_playlist" : "queue_playlist",
-      { playlist_id: state.activePlaylistId }
+      { playlist_id: playlistId }
     );
   }
 
@@ -674,8 +1024,14 @@
 
   async function refreshVisibleActiveGroups() {
     if (!document.querySelector("#page-groups.active")) return;
-    const active = Array.from(state.groups.values()).filter(group => group.active).slice(0, 2);
-    await Promise.allSettled(active.map(group => refreshGroup(group.chat_id)));
+
+    const active = Array.from(state.groups.values())
+      .filter(group => group.active)
+      .slice(0, 2);
+
+    await Promise.allSettled(
+      active.map(group => refreshGroup(group.chat_id))
+    );
   }
 
   async function handleCustomAction(button) {
@@ -684,29 +1040,46 @@
 
     if (action === "select-group") {
       setSelectedGroup(chatId);
+
     } else if (action === "refresh-group") {
       await refreshGroup(chatId);
       toast("Group status updated.");
+
     } else if (action === "control") {
       await controlGroup(chatId, button.dataset.command);
+
     } else if (action === "reload-groups") {
       await loadGroups(true);
       toast("Group list refreshed.");
+
     } else if (action === "load-more") {
       await loadGroups(false);
+
     } else if (action === "connect-group") {
       await connectGroup();
+
     } else if (action === "track-menu") {
       const row = button.closest(".track-row[data-track-id]");
       openTrackActions(trackFromRow(row));
+
     } else if (action === "play-track") {
       await playTrackInGroup("play");
+
     } else if (action === "queue-track") {
       await playTrackInGroup("queue");
+
     } else if (action === "playlist-play") {
-      await playPlaylistInGroup("play");
+      await playPlaylistInGroup(
+        "play",
+        button.dataset.playlistId
+      );
+
     } else if (action === "playlist-queue") {
-      await playPlaylistInGroup("queue");
+      await playPlaylistInGroup(
+        "queue",
+        button.dataset.playlistId
+      );
+
     } else if (action === "close-sheet") {
       closeSheet();
     }
@@ -714,25 +1087,33 @@
 
   function onDocumentClick(event) {
     const customButton = event.target.closest("[data-tp-action]");
+
     if (customButton) {
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      handleCustomAction(customButton).catch(error => toast(error.message));
+
+      handleCustomAction(customButton).catch(
+        error => toast(error.message)
+      );
+
       return;
     }
 
     const groupNav = event.target.closest('[data-page="groups"]');
+
     if (groupNav) {
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
+
       showGroupsPage();
       return;
     }
 
     const actionButton = event.target.closest("[data-action]");
     if (!actionButton) return;
+
     const action = actionButton.dataset.action;
 
     // Remember the playlist clicked in the existing Taalune renderer.
@@ -742,63 +1123,145 @@
     }
 
     if (action === "check-group") {
-      event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
       connectGroup().catch(error => toast(error.message));
+
     } else if (action === "disconnect-group") {
-      event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
       state.selectedGroupId = null;
       saveSelectedGroup();
+
       renderGroupCards();
       enhanceTrackRows();
       enhancePlaylistActions();
+
       toast("Selected group cleared.");
+
     } else if (action === "refresh-group") {
-      event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-      refreshGroup(actionButton.dataset.chatId || state.selectedGroupId)
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      refreshGroup(
+        actionButton.dataset.chatId || state.selectedGroupId
+      )
         .then(() => toast("Group status updated."))
         .catch(error => toast(error.message));
+
     } else if (action === "group-control") {
-      event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
       controlGroup(
         actionButton.dataset.chatId || state.selectedGroupId,
         actionButton.dataset.command
       ).catch(error => toast(error.message));
-    } else if (action === "group-play-track" || action === "group-track") {
-      event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+
+    } else if (
+      action === "group-play-track" ||
+      action === "group-track"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
       const row = actionButton.closest(".track-row[data-track-id]");
+
       try {
-        const track = trackFromRow(row, actionButton.dataset.id);
+        const track = trackFromRow(
+          row,
+          actionButton.dataset.id
+        );
+
         openTrackActions(track);
+
       } catch (error) {
         toast(error.message);
       }
-    } else if (action === "group-play-playlist" || action === "group-queue-playlist") {
-      event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-      playPlaylistInGroup(action === "group-play-playlist" ? "play" : "queue")
-        .catch(error => toast(error.message));
+
+    } else if (
+      action === "group-play-playlist" ||
+      action === "group-queue-playlist"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      playPlaylistInGroup(
+        action === "group-play-playlist" ? "play" : "queue"
+      ).catch(error => toast(error.message));
     }
   }
 
   function onDocumentKeydown(event) {
-    if (event.key !== "Enter" || event.target?.id !== "tpGroupId") return;
+    if (
+      event.key !== "Enter" ||
+      event.target?.id !== "tpGroupId"
+    ) {
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
+
     connectGroup().catch(error => toast(error.message));
   }
 
+  /*
+   * Observer now watches playlist changes without causing
+   * its own playlist buttons to be rebuilt continuously.
+   */
   function startObserver() {
     if (state.observer || !document.body) return;
+
     state.observer = new MutationObserver(records => {
+      let playlistChanged = false;
+
       for (const record of records) {
+        const target = record.target;
+
+        if (
+          target instanceof Element &&
+          (
+            target.id === "page-playlist" ||
+            target.closest("#page-playlist")
+          )
+        ) {
+          playlistChanged = true;
+        }
+
         for (const node of record.addedNodes) {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            enhanceTrackRows(node);
+          if (!(node instanceof Element)) continue;
+
+          enhanceTrackRows(node);
+
+          if (
+            node.id === "page-playlist" ||
+            node.closest("#page-playlist") ||
+            node.querySelector("#page-playlist")
+          ) {
+            playlistChanged = true;
           }
         }
       }
-      enhancePlaylistActions();
+
+      if (playlistChanged) {
+        enhancePlaylistActions();
+      }
     });
-    state.observer.observe(document.body, { childList: true, subtree: true });
+
+    state.observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
     enhanceTrackRows();
     enhancePlaylistActions();
   }
@@ -810,31 +1273,56 @@
 
     try {
       const saved = localStorage.getItem(selectedStorageKey);
+
       if (saved && /^-100\d{6,13}$/.test(saved)) {
         state.selectedGroupId = saved;
       }
     } catch (_) {}
 
-    document.addEventListener("click", onDocumentClick, true);
-    document.addEventListener("keydown", onDocumentKeydown, true);
+    document.addEventListener(
+      "click",
+      onDocumentClick,
+      true
+    );
+
+    document.addEventListener(
+      "keydown",
+      onDocumentKeydown,
+      true
+    );
 
     if (initData) {
       loadGroups(true);
+
       state.refreshTimer = setInterval(() => {
         refreshVisibleActiveGroups().catch(error => {
-          console.warn("Taalune group refresh failed:", error.message);
+          console.warn(
+            "Taalune group refresh failed:",
+            error.message
+          );
         });
       }, 30000);
     }
 
-    window.addEventListener("pagehide", () => {
-      if (state.refreshTimer) clearInterval(state.refreshTimer);
-      state.observer?.disconnect();
-    }, { once: true });
+    window.addEventListener(
+      "pagehide",
+      () => {
+        if (state.refreshTimer) {
+          clearInterval(state.refreshTimer);
+        }
+
+        state.observer?.disconnect();
+      },
+      { once: true }
+    );
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start, { once: true });
+    document.addEventListener(
+      "DOMContentLoaded",
+      start,
+      { once: true }
+    );
   } else {
     start();
   }

@@ -554,6 +554,10 @@ async def upload_cover(request):
     })
 
 
+
+
+
+
 async def stream_track(request):
     video_id = request.match_info["video_id"]
     token = request.query.get("token", "")
@@ -575,6 +579,8 @@ async def stream_track(request):
         connect=15,
         sock_read=60,
     )
+
+    response = None
 
     try:
         async with aiohttp.ClientSession(
@@ -614,7 +620,6 @@ async def stream_track(request):
                             video_id,
                             attempt + 1,
                         )
-
                         continue
 
                     if upstream.status >= 400:
@@ -685,17 +690,44 @@ async def stream_track(request):
     except asyncio.CancelledError:
         raise
 
-    except (
-        ConnectionResetError,
-        aiohttp.ClientConnectionError,
-    ):
+    except ConnectionResetError:
+        # The browser/WebView closed its audio connection.
+        # Do not turn this normal cancellation into an aiohttp ERROR.
         logger.debug(
             "Mini App audio client disconnected: %s",
             video_id,
         )
-        raise
+
+        if response is not None and response.prepared:
+            return response
+
+        return web.Response(status=499)
+
+    except aiohttp.ClientConnectionError:
+        if response is not None and response.prepared:
+            logger.warning(
+                "Audio upstream connection ended after streaming began: %s",
+                video_id,
+            )
+            return response
+
+        logger.warning(
+            "Audio upstream connection failed for %s.",
+            video_id,
+        )
+
+        raise web.HTTPBadGateway(
+            text="Audio source connection failed."
+        )
 
     except Exception:
+        if response is not None and response.prepared:
+            logger.exception(
+                "Audio stream ended unexpectedly after response started: %s",
+                video_id,
+            )
+            return response
+
         logger.exception(
             "Mini App direct stream failed for %s.",
             video_id,
@@ -704,6 +736,7 @@ async def stream_track(request):
         raise web.HTTPBadGateway(
             text="Unable to start audio stream."
         )
+
 
 
 async def check_group_membership(request):
@@ -782,6 +815,58 @@ async def check_group_membership(request):
         "bot_in_group": bot_in_group,
         "user_status": user_status,
     })
+
+
+async def prefetch_stream(request):
+    try:
+        data = await request.json()
+
+    except Exception:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_json",
+            },
+            status=400,
+        )
+
+    if not isinstance(data, dict):
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_json",
+            },
+            status=400,
+        )
+
+    video_id = str(data.get("video_id", "")).strip()
+
+    if not VIDEO_ID_RE.fullmatch(video_id):
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_video_id",
+            },
+            status=400,
+        )
+
+    stream = await yt.stream(video_id)
+
+    if not stream or not stream.get("url"):
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "stream_unavailable",
+            },
+            status=502,
+        )
+
+    return web.json_response({
+        "ok": True,
+        "prefetched": True,
+    })
+
+
 
 
 async def create_stream_token(request):
@@ -909,6 +994,10 @@ def create_app():
         "/api/groups/{chat_id}/membership",
         check_group_membership,
     )
+    application.router.add_post(
+    "/api/stream-prefetch",
+    prefetch_stream,
+)
 
     return application
 

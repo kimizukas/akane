@@ -3,25 +3,20 @@ from __future__ import annotations
 
 import asyncio
 import html
+import time
 from collections import defaultdict, deque
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from aiohttp import web
 
-from VampireMusic import (
-    app,
-    config,
-    db,
-    queue,
-    VampireMusic,
-)
+from VampireMusic import app, config, db, logger, queue, VampireMusic
 from VampireMusic.core.youtube import VIDEO_ID_RE
 from VampireMusic.helpers._dataclass import Track
 from VampireMusic.music_server.social import (
     APIError,
     clean_text,
-    safe_https_url,
     json_body,
+    safe_https_url,
 )
 
 
@@ -29,26 +24,58 @@ class GroupAPI:
     def __init__(self, social_store):
         self.social = social_store
         self._locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._sudo_cache: set[int] = set()
+        self._sudo_cache_until = 0.0
+        self._sudo_lock = asyncio.Lock()
 
     def register(self, application: web.Application) -> None:
-        application.router.add_get(
-            "/api/groups",
-            self.list_groups,
-        )
+        application.router.add_get("/api/groups", self._endpoint(self.list_groups))
         application.router.add_get(
             "/api/groups/{chat_id}/status",
-            self.status,
+            self._endpoint(self.status),
         )
         application.router.add_post(
             "/api/groups/{chat_id}/control",
-            self.control,
+            self._endpoint(self.control),
         )
+
+    def _endpoint(self, handler: Callable[[web.Request], Awaitable[web.StreamResponse]]):
+        async def wrapped(request: web.Request):
+            try:
+                return await handler(request)
+            except APIError as exc:
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": exc.code,
+                        "message": exc.message,
+                    },
+                    status=exc.status,
+                )
+            except asyncio.CancelledError:
+                raise
+            except web.HTTPException:
+                raise
+            except Exception:
+                logger.exception(
+                    "Unhandled group API error on %s %s",
+                    request.method,
+                    request.path,
+                )
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "group_internal_error",
+                        "message": "The group request could not be completed.",
+                    },
+                    status=500,
+                )
+
+        return wrapped
 
     @staticmethod
     def _status(member: Any) -> str:
-        return str(
-            getattr(member, "status", "unknown")
-        ).split(".")[-1].lower()
+        return str(getattr(member, "status", "unknown")).split(".")[-1].lower()
 
     @classmethod
     def _is_member(cls, member: Any) -> bool:
@@ -65,28 +92,35 @@ class GroupAPI:
             "owner",
             "administrator",
             "member",
-            "restricted",
         }
 
-    @staticmethod
-    def _is_sudo(user_id: int) -> bool:
-        try:
-            return int(user_id) in app.sudoers
-        except (TypeError, AttributeError):
-            return False
+    async def _is_global_operator(self, user_id: int) -> bool:
+        owner_id = int(getattr(config, "OWNER_ID", 0) or getattr(app, "owner", 0) or 0)
+        if owner_id and user_id == owner_id:
+            return True
 
-    @classmethod
-    def _is_global_operator(cls, user_id: int) -> bool:
-        owner_id = int(
-            getattr(app, "owner", 0)
-            or getattr(config, "OWNER_ID", 0)
-            or 0
-        )
+        now = time.monotonic()
+        if now >= self._sudo_cache_until:
+            async with self._sudo_lock:
+                now = time.monotonic()
+                if now >= self._sudo_cache_until:
+                    try:
+                        raw_ids = await db.get_sudoers()
+                    except Exception as exc:
+                        logger.exception("Could not load global sudo users")
+                        raise APIError("global_permission_check_failed", 503) from exc
 
-        return (
-            user_id == owner_id
-            or cls._is_sudo(user_id)
-        )
+                    sudo_ids = set()
+                    for raw_id in raw_ids or []:
+                        try:
+                            sudo_ids.add(int(raw_id))
+                        except (TypeError, ValueError):
+                            continue
+
+                    self._sudo_cache = sudo_ids
+                    self._sudo_cache_until = now + 30.0
+
+        return user_id in self._sudo_cache
 
     async def _context(
         self,
@@ -95,7 +129,6 @@ class GroupAPI:
         require_control: bool,
         chat_id: int | None = None,
     ) -> dict[str, Any]:
-
         try:
             user_id = int(request["telegram_user"]["id"])
         except (KeyError, TypeError, ValueError):
@@ -112,76 +145,49 @@ class GroupAPI:
         if chat_id >= 0:
             raise APIError("group_only", 400)
 
-        is_global_operator = self._is_global_operator(user_id)
+        is_global_operator = await self._is_global_operator(user_id)
 
         try:
             chat = await app.get_chat(chat_id)
-        except Exception:
-            raise APIError("bot_cannot_access_group", 403)
+        except Exception as exc:
+            raise APIError("bot_cannot_access_group", 403) from exc
 
-        chat_type = str(
-            getattr(chat, "type", "")
-        ).split(".")[-1].lower()
-
+        chat_type = str(getattr(chat, "type", "")).split(".")[-1].lower()
         if chat_type != "supergroup":
             raise APIError("supergroup_required", 400)
 
         try:
             assistant = await db.get_client(chat_id)
-        except Exception:
-            raise APIError("assistant_unavailable", 503)
+        except Exception as exc:
+            raise APIError("assistant_unavailable", 503) from exc
 
         if assistant is None:
             raise APIError("assistant_unavailable", 503)
 
-        # Normal users must belong to the group.
-        # Bot owner and sudo users can access saved groups globally.
         is_group_member = False
         is_group_admin = False
 
         if is_global_operator:
             user_status = "global_operator"
-
         else:
             try:
-                user_member = await assistant.get_chat_member(
-                    chat_id,
-                    user_id,
-                )
-            except Exception:
-                raise APIError(
-                    "userbot_cannot_verify_membership",
-                    403,
-                )
+                user_member = await assistant.get_chat_member(chat_id, user_id)
+            except Exception as exc:
+                raise APIError("userbot_cannot_verify_membership", 403) from exc
 
             if not self._is_member(user_member):
                 raise APIError("not_group_member", 403)
 
             is_group_member = True
             user_status = self._status(user_member)
+            is_group_admin = user_status in {"administrator", "creator", "owner"}
 
-            is_group_admin = user_status in {
-                "administrator",
-                "creator",
-                "owner",
-            }
-
-        # Both playback clients must be present in the group.
+        # Playback requires both Telegram clients to be members of this group.
         try:
-            bot_member = await app.get_chat_member(
-                chat_id,
-                app.id,
-            )
-
-            assistant_member = await assistant.get_chat_member(
-                chat_id,
-                assistant.id,
-            )
-        except Exception:
-            raise APIError(
-                "unable_to_verify_group_clients",
-                403,
-            )
+            bot_member = await app.get_chat_member(chat_id, app.id)
+            assistant_member = await assistant.get_chat_member(chat_id, assistant.id)
+        except Exception as exc:
+            raise APIError("unable_to_verify_group_clients", 403) from exc
 
         if not self._is_member(bot_member):
             raise APIError("bot_not_in_group", 409)
@@ -190,28 +196,15 @@ class GroupAPI:
             raise APIError("assistant_not_in_group", 409)
 
         is_authorized = False
-
-        # Group admins and global operators do not need a DB auth lookup.
         if not is_global_operator and not is_group_admin:
             try:
-                is_authorized = await db.is_auth(
-                    chat_id,
-                    user_id,
-                )
-            except Exception:
-                raise APIError("authorization_check_failed", 503)
+                is_authorized = await db.is_auth(chat_id, user_id)
+            except Exception as exc:
+                raise APIError("authorization_check_failed", 503) from exc
 
-        can_control = (
-            is_global_operator
-            or is_group_admin
-            or is_authorized
-        )
-
+        can_control = is_global_operator or is_group_admin or is_authorized
         if require_control and not can_control:
-            raise APIError(
-                "group_control_permission_denied",
-                403,
-            )
+            raise APIError("group_control_permission_denied", 403)
 
         if is_global_operator:
             access_role = "global_operator"
@@ -243,56 +236,29 @@ class GroupAPI:
 
         return {
             "id": str(getattr(media, "id", "")),
-            "title": str(
-                getattr(media, "title", "Unknown track")
-                or "Unknown track"
-            ),
-            "artist": str(
-                getattr(media, "channel_name", None)
-                or "Unknown artist"
-            ),
-            "duration": str(
-                getattr(media, "duration", "00:00")
-                or "00:00"
-            ),
-            "duration_sec": int(
-                getattr(media, "duration_sec", 0) or 0
-            ),
+            "title": str(getattr(media, "title", None) or "Unknown track"),
+            "artist": str(getattr(media, "channel_name", None) or "Unknown artist"),
+            "duration": str(getattr(media, "duration", None) or "00:00"),
+            "duration_sec": int(getattr(media, "duration_sec", 0) or 0),
             "thumbnail": getattr(media, "thumbnail", None),
-            "user": str(getattr(media, "user", "") or ""),
+            "user": str(getattr(media, "user", None) or ""),
         }
 
     @staticmethod
     def _duration(seconds: int) -> str:
         hours, remainder = divmod(seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
-
         if hours:
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
         return f"{minutes:02d}:{seconds:02d}"
 
-    def _make_track(
-        self,
-        data: dict[str, Any],
-        requester: str,
-    ) -> Track:
-
+    def _make_track(self, data: dict[str, Any], requester: str) -> Track:
         track_id = str(data.get("id", "")).strip()
-
         if not VIDEO_ID_RE.fullmatch(track_id):
             raise APIError("invalid_track_id", 400)
 
-        title = clean_text(
-            data.get("title"),
-            160,
-            allow_empty=False,
-        )
-
-        artist = clean_text(
-            data.get("artist", "Unknown artist"),
-            160,
-        )
+        title = clean_text(data.get("title"), 160, allow_empty=False)
+        artist = clean_text(data.get("artist", "Unknown artist"), 160)
 
         try:
             duration_sec = int(data.get("duration_sec", 0))
@@ -323,30 +289,17 @@ class GroupAPI:
         except (TypeError, ValueError, AttributeError):
             return 100
 
-    async def _group_payload(
-        self,
-        context: dict[str, Any],
-    ) -> dict[str, Any]:
-
+    async def _group_payload(self, context: dict[str, Any]) -> dict[str, Any]:
         chat_id = context["chat_id"]
         items = queue.get_queue(chat_id)
         current = items[0] if items else None
-
         active = await db.get_call(chat_id)
         playing = await db.playing(chat_id) if active else False
 
         return {
             "chat_id": chat_id,
-            "title": getattr(
-                context["chat"],
-                "title",
-                "Telegram group",
-            ),
-            "username": getattr(
-                context["chat"],
-                "username",
-                None,
-            ),
+            "title": getattr(context["chat"], "title", "Telegram group"),
+            "username": getattr(context["chat"], "username", None),
             "user_status": context["user_status"],
             "assistant_id": context["assistant"].id,
             "is_member": context["is_member"],
@@ -358,10 +311,7 @@ class GroupAPI:
             "active": active,
             "playing": playing,
             "current": self._track_payload(current),
-            "queue": [
-                self._track_payload(item)
-                for item in items[1:]
-            ],
+            "queue": [self._track_payload(item) for item in items[1:]],
             "queue_count": max(0, len(items) - 1),
         }
 
@@ -377,21 +327,18 @@ class GroupAPI:
 
         try:
             saved_chat_ids = await db.get_chats()
-        except Exception:
-            raise APIError("group_list_unavailable", 503)
+        except Exception as exc:
+            raise APIError("group_list_unavailable", 503) from exc
 
         candidates = []
         seen = set()
-
         for raw_id in reversed(saved_chat_ids):
             try:
                 chat_id = int(raw_id)
             except (TypeError, ValueError):
                 continue
-
             if chat_id >= 0 or chat_id in seen:
                 continue
-
             seen.add(chat_id)
             candidates.append(chat_id)
 
@@ -407,31 +354,27 @@ class GroupAPI:
                 )
 
         checked = await asyncio.gather(
-            *[
-                inspect_group(group_id)
-                for group_id in page_ids
-            ],
+            *(inspect_group(group_id) for group_id in page_ids),
             return_exceptions=True,
         )
 
         groups = []
-
         for context in checked:
             if isinstance(context, asyncio.CancelledError):
                 raise context
-
             if isinstance(context, BaseException):
-                # Groups the user cannot access are not exposed.
+                # A group is intentionally omitted when the requester is
+                # not a member (unless they are configured global staff).
                 continue
-
             try:
-                groups.append(
-                    await self._group_payload(context)
-                )
+                groups.append(await self._group_payload(context))
             except asyncio.CancelledError:
                 raise
             except Exception:
-                continue
+                logger.exception(
+                    "Could not build group card for chat %s",
+                    context.get("chat_id"),
+                )
 
         next_offset = (
             offset + len(page_ids)
@@ -453,7 +396,6 @@ class GroupAPI:
         *,
         mode: str,
     ) -> dict[str, Any]:
-
         async with self._locks[chat_id]:
             active = await db.get_call(chat_id)
             existing = queue.get_queue(chat_id)
@@ -463,15 +405,10 @@ class GroupAPI:
                 if active:
                     if current and current.message_id:
                         try:
-                            await app.delete_messages(
-                                chat_id,
-                                current.message_id,
-                            )
+                            await app.delete_messages(chat_id, current.message_id)
                         except Exception:
                             pass
-
                     queue.force_add(chat_id, media)
-
                 else:
                     queue.clear(chat_id)
                     queue.add(chat_id, media)
@@ -480,30 +417,19 @@ class GroupAPI:
                 if active and existing:
                     if len(existing) >= self._queue_limit():
                         raise APIError("group_queue_limit", 409)
-
                     position = queue.add(chat_id, media)
-
                     VampireMusic.schedule_prefetch(chat_id)
+                    return {"status": "queued", "position": position}
 
-                    return {
-                        "status": "queued",
-                        "position": position,
-                    }
-
-                # No active track exists: the requested track becomes
-                # the first track and starts playback immediately.
+                # With no active item, queue means start this track now.
                 queue.clear(chat_id)
                 queue.add(chat_id, media)
-
             else:
                 raise APIError("unsupported_group_action", 400)
 
             notice = await app.send_message(
                 chat_id,
-                (
-                    "♫ <b>Playing from Taalune</b>\n"
-                    + html.escape(media.title)
-                ),
+                "♫ <b>Playing from Taalune</b>\n" + html.escape(media.title),
             )
 
             await VampireMusic.play_media(
@@ -512,16 +438,10 @@ class GroupAPI:
                 media=media,
             )
 
-            if not await db.get_call(chat_id):
-                raise APIError(
-                    "voice_chat_playback_not_started",
-                    409,
-                )
+            if not await db.get_call(chat_id) or queue.get_current(chat_id) is not media:
+                raise APIError("voice_chat_playback_not_started", 409)
 
-            return {
-                "status": "playing",
-                "position": 0,
-            }
+            return {"status": "playing", "position": 0}
 
     async def _start_playlist(
         self,
@@ -530,20 +450,14 @@ class GroupAPI:
         requester: str,
         mode: str,
     ) -> dict[str, Any]:
-
         if not tracks:
             raise APIError("playlist_empty", 409)
 
-        medias = [
-            self._make_track(track, requester)
-            for track in tracks
-        ]
-
+        medias = [self._make_track(track, requester) for track in tracks]
         limit = self._queue_limit()
 
         if len(medias) > limit:
             raise APIError("group_queue_limit", 409)
-
         if mode not in {"play_now", "queue"}:
             raise APIError("unsupported_group_action", 400)
 
@@ -551,19 +465,12 @@ class GroupAPI:
             active = await db.get_call(chat_id)
             existing = queue.get_queue(chat_id)
 
-            # Queue behind the current track only when a real current
-            # queue item exists. Otherwise the playlist must start now.
             if mode == "queue" and active and existing:
                 if len(existing) + len(medias) > limit:
                     raise APIError("group_queue_limit", 409)
 
-                positions = [
-                    queue.add(chat_id, media)
-                    for media in medias
-                ]
-
+                positions = [queue.add(chat_id, media) for media in medias]
                 VampireMusic.schedule_prefetch(chat_id)
-
                 return {
                     "status": "queued",
                     "added": len(medias),
@@ -572,40 +479,26 @@ class GroupAPI:
 
             if mode == "play_now" and active:
                 pending = existing[1:] if existing else []
-
                 if len(pending) + len(medias) > limit:
                     raise APIError("group_queue_limit", 409)
 
                 current = existing[0] if existing else None
-
                 if current and current.message_id:
                     try:
-                        await app.delete_messages(
-                            chat_id,
-                            current.message_id,
-                        )
+                        await app.delete_messages(chat_id, current.message_id)
                     except Exception:
                         pass
 
-                queue.queues[chat_id] = deque([
-                    *medias,
-                    *pending,
-                ])
-
+                queue.queues[chat_id] = deque([*medias, *pending])
             else:
-                # Also handles queue mode when nothing is playing:
-                # the first playlist track starts immediately.
+                # Queue requested while idle: first playlist item must start.
                 queue.clear(chat_id)
-
                 for media in medias:
                     queue.add(chat_id, media)
 
             notice = await app.send_message(
                 chat_id,
-                (
-                    "♫ <b>Playlist started from Taalune</b>\n"
-                    + html.escape(medias[0].title)
-                ),
+                "♫ <b>Playlist started from Taalune</b>\n" + html.escape(medias[0].title),
             )
 
             await VampireMusic.play_media(
@@ -614,11 +507,8 @@ class GroupAPI:
                 media=medias[0],
             )
 
-            if not await db.get_call(chat_id):
-                raise APIError(
-                    "voice_chat_playback_not_started",
-                    409,
-                )
+            if not await db.get_call(chat_id) or queue.get_current(chat_id) is not medias[0]:
+                raise APIError("voice_chat_playback_not_started", 409)
 
             return {
                 "status": "playing",
@@ -627,20 +517,18 @@ class GroupAPI:
             }
 
     async def status(self, request: web.Request):
-        context = await self._context(
-            request,
-            require_control=False,
-        )
-
+        context = await self._context(request, require_control=False)
         chat_id = context["chat_id"]
 
-        # A manually connected, verified group becomes discoverable
-        # on the next Mini App load.
+        # Load the in-memory chat list before checking it, so an existing
+        # Mongo record is not inserted into the collection a second time.
         try:
-            if not await db.is_chat(chat_id):
+            saved_chat_ids = await db.get_chats()
+            if chat_id not in saved_chat_ids:
                 await db.add_chat(chat_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception("Could not save connected group %s", chat_id)
+            raise APIError("group_registration_failed", 503) from exc
 
         return web.json_response({
             "ok": True,
@@ -648,17 +536,10 @@ class GroupAPI:
         })
 
     async def control(self, request: web.Request):
-        context = await self._context(
-            request,
-            require_control=True,
-        )
-
+        context = await self._context(request, require_control=True)
         chat_id = context["chat_id"]
         user = request["telegram_user"]
-
-        requester = (
-            f"Mini App · @{user.get('username') or user['id']}"
-        )
+        requester = f"Mini App · @{user.get('username') or user['id']}"
 
         data = await json_body(request)
         action = data.get("action")
@@ -670,20 +551,15 @@ class GroupAPI:
             if action == "pause":
                 if not await db.playing(chat_id):
                     raise APIError("already_paused", 409)
-
                 result = await VampireMusic.pause(chat_id)
 
             elif action == "resume":
                 if await db.playing(chat_id):
                     raise APIError("already_playing", 409)
-
                 result = await VampireMusic.resume(chat_id)
 
             elif action == "skip":
-                await VampireMusic.play_next(
-                    chat_id,
-                    skip_user=requester,
-                )
+                await VampireMusic.play_next(chat_id, skip_user=requester)
                 result = True
 
             else:
@@ -693,75 +569,34 @@ class GroupAPI:
             if result is False:
                 raise APIError("group_control_failed", 409)
 
-            return web.json_response({
-                "ok": True,
-                "action": action,
-            })
+            return web.json_response({"ok": True, "action": action})
 
         if action in {"queue_track", "play_track"}:
             track_data = data.get("track")
-
             if not isinstance(track_data, dict):
                 raise APIError("track_required", 400)
 
-            media = self._make_track(
-                track_data,
-                requester,
-            )
-
-            mode = (
-                "play_now"
-                if action == "play_track"
-                else "queue"
-            )
-
-            result = await self._start_media(
-                chat_id,
-                media,
-                mode=mode,
-            )
-
-            return web.json_response({
-                "ok": True,
-                **result,
-            })
+            media = self._make_track(track_data, requester)
+            mode = "play_now" if action == "play_track" else "queue"
+            result = await self._start_media(chat_id, media, mode=mode)
+            return web.json_response({"ok": True, **result})
 
         if action in {"queue_playlist", "play_playlist"}:
             if not self.social.ready:
-                raise APIError(
-                    "social_storage_unavailable",
-                    503,
-                )
+                raise APIError("social_storage_unavailable", 503)
 
-            playlist_id = data.get("playlist_id")
-
-            playlist = await self.social.get_playlist(
-                playlist_id,
-            )
-
-            if not await self.social.can_view_playlist(
-                playlist,
-                context["user_id"],
-            ):
+            playlist = await self.social.get_playlist(data.get("playlist_id"))
+            if not await self.social.can_view_playlist(playlist, context["user_id"]):
                 raise APIError("private_playlist", 403)
 
-            mode = (
-                "play_now"
-                if action == "play_playlist"
-                else "queue"
-            )
-
+            mode = "play_now" if action == "play_playlist" else "queue"
             result = await self._start_playlist(
                 chat_id,
                 playlist.get("tracks", []),
                 requester,
                 mode,
             )
-
-            return web.json_response({
-                "ok": True,
-                **result,
-            })
+            return web.json_response({"ok": True, **result})
 
         raise APIError("unsupported_group_action", 400)
 
@@ -770,7 +605,6 @@ def register_group_routes(
     application: web.Application,
     social_store,
 ) -> GroupAPI:
-
     api = GroupAPI(social_store)
     api.register(application)
     return api

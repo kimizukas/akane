@@ -1,6 +1,4 @@
 
-"""Authenticated Telegram voice-chat controls for the Taalune Mini App."""
-
 from __future__ import annotations
 
 import asyncio
@@ -292,125 +290,22 @@ class GroupAPI:
         except (TypeError, ValueError, AttributeError):
             return 100
 
+
+
     async def _start_media(
-        self,
-        chat_id: int,
-        media: Track,
-        *,
-        mode: str,
-    ) -> dict[str, Any]:
+    self,
+    chat_id: int,
+    media: Track,
+    *,
+    mode: str,
+) -> dict[str, Any]:
 
-        async with self._locks[chat_id]:
-            active = await db.get_call(chat_id)
-            current = queue.get_current(chat_id)
+    async with self._locks[chat_id]:
+        active = await db.get_call(chat_id)
+        current = queue.get_current(chat_id)
 
-            if mode == "play_now":
-                if active:
-                    if current and current.message_id:
-                        try:
-                            await app.delete_messages(
-                                chat_id,
-                                current.message_id,
-                            )
-                        except Exception:
-                            pass
-
-                    queue.force_add(chat_id, media)
-
-                else:
-                    queue.clear(chat_id)
-                    queue.add(chat_id, media)
-
-            elif not active:
-                queue.clear(chat_id)
-                queue.add(chat_id, media)
-
-            else:
-                limit = self._queue_limit()
-
-                if len(queue.get_queue(chat_id)) >= limit:
-                    raise APIError("group_queue_limit", 409)
-
-                position = queue.add(chat_id, media)
-
-                return {
-                    "status": "queued",
-                    "position": position,
-                }
-
-            notice = await app.send_message(
-                chat_id,
-                (
-                    "♫ <b>Playing from Taalune</b>\n"
-                    + html.escape(media.title)
-                ),
-            )
-
-            await VampireMusic.play_media(
-                chat_id=chat_id,
-                message=notice,
-                media=media,
-            )
-
-            if not await db.get_call(chat_id):
-                raise APIError(
-                    "voice_chat_playback_not_started",
-                    409,
-                )
-
-            return {
-                "status": "playing",
-                "position": 0,
-            }
-
-    async def _start_playlist(
-        self,
-        chat_id: int,
-        tracks: list[dict[str, Any]],
-        requester: str,
-        mode: str,
-    ) -> dict[str, Any]:
-
-        if not tracks:
-            raise APIError("playlist_empty", 409)
-
-        medias = [
-            self._make_track(track, requester)
-            for track in tracks
-        ]
-
-        limit = self._queue_limit()
-
-        if len(medias) > limit:
-            raise APIError("group_queue_limit", 409)
-
-        async with self._locks[chat_id]:
-            active = await db.get_call(chat_id)
-            existing = queue.get_queue(chat_id)
-
-            if mode == "queue" and active:
-                if len(existing) + len(medias) > limit:
-                    raise APIError("group_queue_limit", 409)
-
-                positions = [
-                    queue.add(chat_id, media)
-                    for media in medias
-                ]
-
-                return {
-                    "status": "queued",
-                    "added": len(medias),
-                    "first_position": positions[0],
-                }
-
-            if mode == "play_now" and active:
-                pending = existing[1:]
-
-                if len(pending) + len(medias) > limit:
-                    raise APIError("group_queue_limit", 409)
-
-                current = queue.get_current(chat_id)
-
+        if mode == "play_now":
+            if active:
                 if current and current.message_id:
                     try:
                         await app.delete_messages(
@@ -420,44 +315,157 @@ class GroupAPI:
                     except Exception:
                         pass
 
-                # New playlist becomes current; existing upcoming tracks
-                # remain behind the new playlist.
-                queue.queues[chat_id] = deque([
-                    *medias,
-                    *pending,
-                ])
+                queue.force_add(chat_id, media)
 
             else:
                 queue.clear(chat_id)
+                queue.add(chat_id, media)
 
-                for media in medias:
-                    queue.add(chat_id, media)
+        elif not active:
+            queue.clear(chat_id)
+            queue.add(chat_id, media)
 
-            notice = await app.send_message(
-                chat_id,
-                (
-                    "♫ <b>Playlist started from Taalune</b>\n"
-                    + html.escape(medias[0].title)
-                ),
-            )
+        else:
+            limit = self._queue_limit()
 
-            await VampireMusic.play_media(
-                chat_id=chat_id,
-                message=notice,
-                media=medias[0],
-            )
+            if len(queue.get_queue(chat_id)) >= limit:
+                raise APIError("group_queue_limit", 409)
 
-            if not await db.get_call(chat_id):
-                raise APIError(
-                    "voice_chat_playback_not_started",
-                    409,
-                )
+            position = queue.add(chat_id, media)
+
+            VampireMusic.schedule_prefetch(chat_id)
 
             return {
-                "status": "playing",
-                "added": len(medias),
-                "first_position": 0,
+                "status": "queued",
+                "position": position,
             }
+
+        notice = await app.send_message(
+            chat_id,
+            (
+                "♫ <b>Playing from Taalune</b>\n"
+                + html.escape(media.title)
+            ),
+        )
+
+        await VampireMusic.play_media(
+            chat_id=chat_id,
+            message=notice,
+            media=media,
+        )
+
+        if not await db.get_call(chat_id):
+            raise APIError(
+                "voice_chat_playback_not_started",
+                409,
+            )
+
+        return {
+            "status": "playing",
+            "position": 0,
+        }
+
+
+
+    async def _start_playlist(
+    self,
+    chat_id: int,
+    tracks: list[dict[str, Any]],
+    requester: str,
+    mode: str,
+) -> dict[str, Any]:
+
+    if not tracks:
+        raise APIError("playlist_empty", 409)
+
+    medias = [
+        self._make_track(track, requester)
+        for track in tracks
+    ]
+
+    limit = self._queue_limit()
+
+    if len(medias) > limit:
+        raise APIError("group_queue_limit", 409)
+
+    async with self._locks[chat_id]:
+        active = await db.get_call(chat_id)
+        existing = queue.get_queue(chat_id)
+
+        if mode == "queue" and active:
+            if len(existing) + len(medias) > limit:
+                raise APIError("group_queue_limit", 409)
+
+            positions = [
+                queue.add(chat_id, media)
+                for media in medias
+            ]
+
+            VampireMusic.schedule_prefetch(chat_id)
+
+            return {
+                "status": "queued",
+                "added": len(medias),
+                "first_position": positions[0],
+            }
+
+        if mode == "play_now" and active:
+            pending = existing[1:]
+
+            if len(pending) + len(medias) > limit:
+                raise APIError("group_queue_limit", 409)
+
+            current = queue.get_current(chat_id)
+
+            if current and current.message_id:
+                try:
+                    await app.delete_messages(
+                        chat_id,
+                        current.message_id,
+                    )
+                except Exception:
+                    pass
+
+            # New playlist becomes current; existing upcoming tracks
+            # remain behind the new playlist.
+            queue.queues[chat_id] = deque([
+                *medias,
+                *pending,
+            ])
+
+        else:
+            queue.clear(chat_id)
+
+            for media in medias:
+                queue.add(chat_id, media)
+
+        notice = await app.send_message(
+            chat_id,
+            (
+                "♫ <b>Playlist started from Taalune</b>\n"
+                + html.escape(medias[0].title)
+            ),
+        )
+
+        await VampireMusic.play_media(
+            chat_id=chat_id,
+            message=notice,
+            media=medias[0],
+        )
+
+        if not await db.get_call(chat_id):
+            raise APIError(
+                "voice_chat_playback_not_started",
+                409,
+            )
+
+        return {
+            "status": "playing",
+            "added": len(medias),
+            "first_position": 0,
+        }
+
+
 
     async def status(self, request: web.Request):
         context = await self._context(

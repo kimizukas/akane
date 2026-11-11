@@ -1,3 +1,4 @@
+
 :root {
   color-scheme: dark;
 
@@ -1894,6 +1895,192 @@ progress {
   background: rgba(234, 182, 216, .08);
 }
 
+/* -------------------------------------------------------
+   Multi-group player
+   ------------------------------------------------------- */
+
+.group-connect {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(31, 25, 39, 0.78);
+}
+
+.group-connect .field {
+  min-width: 0;
+  margin: 0;
+}
+
+.group-list-heading {
+  margin-top: 24px;
+}
+
+.group-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.group-card {
+  min-width: 0;
+  padding: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(31, 25, 39, 0.94);
+}
+
+.group-card.selected {
+  border-color: rgba(177, 135, 255, 0.65);
+}
+
+.group-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.group-card-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.group-status-pill {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.group-status-pill.is-playing {
+  color: #a8e6bd;
+  background: rgba(69, 180, 110, 0.12);
+}
+
+.group-status-pill.is-paused {
+  color: #f0d18a;
+  background: rgba(210, 160, 65, 0.12);
+}
+
+.group-status-pill.is-idle {
+  color: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.group-card-current {
+  margin-top: 16px;
+}
+
+.group-current {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  margin-top: 9px;
+}
+
+.group-current .track-cover {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  object-fit: cover;
+  border-radius: 9px;
+}
+
+.group-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.group-card-actions > button {
+  min-width: 0;
+}
+
+.group-card-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.group-view-only {
+  margin-top: 13px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 11px;
+  color: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.group-card-queue {
+  margin-top: 17px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.group-card-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.group-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 0;
+}
+
+.group-queue-row + .group-queue-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.group-queue-row .track-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-empty {
+  padding: 12px 0;
+  text-align: left;
+}
+
+.group-load-more {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+}
+
+.group-target-note {
+  margin-top: 16px;
+  padding: 11px 12px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 13px;
+}
+
+.group-target-note strong {
+  color: rgba(255, 255, 255, 0.94);
+}
+
 @media (min-width: 640px) {
   .app-shell {
     padding-right: 24px;
@@ -1931,6 +2118,20 @@ progress {
     width: 53px;
     height: 53px;
     flex-basis: 53px;
+  }
+}
+
+@media (max-width: 480px) {
+  .group-connect {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .group-card {
+    padding: 12px;
+  }
+
+  .group-card-actions {
+    gap: 7px;
   }
 }
 

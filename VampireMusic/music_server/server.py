@@ -253,13 +253,12 @@ async def stream_track(request):
         raise web.HTTPForbidden(text="Invalid or expired stream token.")
 
     range_header = request.headers.get("Range")
+
     timeout = aiohttp.ClientTimeout(
         total=None,
         connect=15,
         sock_read=60,
     )
-
-    cdn_forbidden = False
 
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -270,7 +269,7 @@ async def stream_track(request):
                 )
 
                 if not stream or not stream.get("url"):
-                    break
+                    continue
 
                 headers = dict(stream.get("headers") or {})
 
@@ -290,12 +289,11 @@ async def stream_track(request):
                             video_id,
                             attempt + 1,
                         )
-                        cdn_forbidden = True
                         continue
 
                     if upstream.status >= 400:
                         logger.warning(
-                            "Audio CDN returned HTTP %s for %s",
+                            "Audio CDN returned HTTP %s for %s.",
                             upstream.status,
                             video_id,
                         )
@@ -343,58 +341,26 @@ async def stream_track(request):
                     await response.write_eof()
                     return response
 
-        # Temporary fallback: use a downloaded local audio file
-        # only when YouTube CDN rejects both stream URLs with HTTP 403.
-        if cdn_forbidden:
-            logger.warning(
-                "Using temporary download fallback for %s.",
-                video_id,
-            )
-
-            filepath = await yt.download(
-                f"https://www.youtube.com/watch?v={video_id}",
-                video=False,
-            )
-
-            if not filepath:
-                raise web.HTTPBadGateway(
-                    text="Audio download fallback failed."
-                )
-
-            audio_path = Path(filepath).resolve()
-            download_dir = DOWNLOAD_DIR.resolve()
-
-            if (
-                not audio_path.is_file()
-                or not audio_path.is_relative_to(download_dir)
-            ):
-                raise web.HTTPBadGateway(
-                    text="Invalid downloaded audio file."
-                )
-
-            return web.FileResponse(
-                audio_path,
-                headers={
-                    "Cache-Control": "private, no-store",
-                    "X-Content-Type-Options": "nosniff",
-                    "Accept-Ranges": "bytes",
-                },
-            )
-
         raise web.HTTPBadGateway(
-            text="Unable to resolve audio source."
+            text="Audio source unavailable after URL refresh."
         )
 
     except web.HTTPException:
         raise
+
     except asyncio.CancelledError:
         raise
-    except (ConnectionResetError, aiohttp.ClientConnectionError):
+
+    except (
+        ConnectionResetError,
+        aiohttp.ClientConnectionError,
+    ):
         logger.debug(
             "Mini App audio client disconnected: %s",
             video_id,
         )
         raise
+
     except Exception:
         logger.exception(
             "Mini App direct stream failed for %s.",
@@ -406,6 +372,10 @@ async def stream_track(request):
 
 
 
+
+            
+
+    
 
 
 async def check_group_membership(request):

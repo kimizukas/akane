@@ -1,9 +1,3 @@
-"""Authenticated social and playlist API for the Taalune Mini App.
-
-This module deliberately uses the repository's existing PyMongo AsyncMongoClient
-(database object) and aiohttp stack. It does not introduce a new database client.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -43,7 +37,7 @@ async def social_error_middleware(request: web.Request, handler):
     social_prefixes = (
         "/api/profile", "/api/people", "/api/search/people", "/api/search/playlists",
         "/api/playlists", "/api/invitations", "/api/notifications",
-        "/api/tracks", "/api/library/liked-tracks",
+        "/api/tracks", "/api/library/liked-tracks", "/api/listening",
     )
     store = request.app.get("social_store")
     if request.path.startswith(social_prefixes) and store and not store.ready:
@@ -116,6 +110,7 @@ class SocialStore:
         self.user_follows = database.music_user_follows
         self.playlist_follows = database.music_playlist_follows
         self.playlist_likes = database.music_playlist_likes
+        self.listening_history = database.music_listening_history
         self.track_likes = database.music_track_likes
         self.invitations = database.music_invitations
         self.notifications = database.music_notifications
@@ -178,7 +173,12 @@ class SocialStore:
             [("recipient_id", ASCENDING), ("created_at", DESCENDING)],
             name="music_notification_inbox",
         )
+        await self.listening_history.create_index(
+    [("updated_at", DESCENDING)],
+    name="music_listening_history_updated",
+)
         self.ready = True
+       
 
     async def ensure_profile(self, user: dict[str, Any]) -> dict[str, Any]:
         user_id = int(user["id"])
@@ -385,11 +385,81 @@ class SocialAPI:
         app.router.add_post("/api/invitations/{invitation_id}/respond", self.respond_invitation)
         app.router.add_get("/api/notifications", self.list_notifications)
         app.router.add_post("/api/notifications/{notification_id}/read", self.mark_notification_read)
+        app.router.add_post(
+    "/api/listening/history",
+    self.record_listening,
+)
 
     async def my_profile(self, request: web.Request):
         user = request["telegram_user"]
         profile = await self.store.ensure_profile(user)
         return web.json_response({"ok": True, "profile": await self.store.profile_payload(profile, int(user["id"]))})
+
+    async def record_listening(self, request: web.Request):
+        user_id = int(request["telegram_user"]["id"])
+        data = await json_body(request)
+
+        track_id = str(data.get("id", "")).strip()
+
+        if not VIDEO_ID_RE.fullmatch(track_id):
+            raise APIError("invalid_track_id", 400)
+
+        title = clean_text(
+            data.get("title"),
+            160,
+            allow_empty=False,
+        )
+
+        artist = clean_text(
+            data.get("artist", "Unknown artist"),
+            160,
+        )
+
+        try:
+            duration_sec = int(data.get("duration_sec", 0))
+        except (TypeError, ValueError):
+            raise APIError("invalid_duration", 400)
+
+        if not 0 <= duration_sec <= 86400:
+            raise APIError("invalid_duration", 400)
+
+        now = utcnow()
+
+        item = {
+            "id": track_id,
+            "title": title,
+            "artist": artist or "Unknown artist",
+            "duration_sec": duration_sec,
+            "thumbnail": safe_https_url(
+                data.get("thumbnail")
+            ),
+            "played_at": now,
+        }
+
+        await self.store.listening_history.update_one(
+            {"_id": user_id},
+            {
+                "$push": {
+                    "items": {
+                        "$each": [item],
+                        "$position": 0,
+                        "$slice": 60,
+                    }
+                },
+                "$set": {
+                    "updated_at": now,
+                },
+            },
+            upsert=True,
+        )
+
+        return web.json_response({
+            "ok": True,
+            "recorded": True,
+        })
+
+
+
 
     async def update_profile(self, request: web.Request):
         user_id = int(request["telegram_user"]["id"])
@@ -566,29 +636,163 @@ class SocialAPI:
         await self.store.playlists.insert_one(doc)
         return web.json_response({"ok": True, "playlist": await self.store.playlist_payload(doc, owner_id, include_tracks=True)}, status=201)
 
+
+
+
+    async def _public_playlist_results(
+        self,
+        documents,
+        user_id: int,
+        limit: int,
+        query: str = "",
+    ) -> list[dict[str, Any]]:
+        results = [
+            await self.store.playlist_payload(doc, user_id)
+            for doc in documents
+        ]
+
+        now = utcnow()
+
+        def score(item):
+            likes = int(item.get("like_count", 0))
+            followers = int(item.get("follower_count", 0))
+            tracks = int(item.get("track_count", 0))
+
+            try:
+                updated = datetime.fromisoformat(
+                    item.get("updated_at") or now.isoformat()
+                )
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                updated = now
+
+            age_hours = max(
+                0.0,
+                (now - updated).total_seconds() / 3600,
+            )
+
+            engagement = (
+                likes * 4
+                + followers * 3
+                + min(tracks, 100) * 0.25
+            )
+
+            popularity = engagement / (
+                1 + (age_hours / 24) ** 0.65
+            )
+
+            if query:
+                name = str(item.get("name", "")).lower()
+                description = str(
+                    item.get("description", "")
+                ).lower()
+                q = query.lower()
+
+                if name.startswith(q):
+                    popularity += 100
+                elif q in name:
+                    popularity += 60
+                elif q in description:
+                    popularity += 20
+
+            return popularity
+
+        results.sort(
+            key=score,
+            reverse=True,
+        )
+
+        return results[:limit]
+
     async def list_playlists(self, request: web.Request):
         user_id = int(request["telegram_user"]["id"])
         scope = request.query.get("scope", "mine")
         limit = page_size(request)
+
         if scope == "mine":
-            query = {"owner_id": user_id, "deleted_at": {"$exists": False}}
-            cursor = self.store.playlists.find(query).sort("updated_at", DESCENDING).limit(limit)
+            cursor = self.store.playlists.find({
+                "owner_id": user_id,
+                "deleted_at": {"$exists": False},
+            }).sort(
+                "updated_at",
+                DESCENDING,
+            ).limit(limit)
+
+            results = [
+                await self.store.playlist_payload(doc, user_id)
+                async for doc in cursor
+            ]
+
         elif scope == "collaborating":
-            query = {"collaborators.user_id": user_id, "deleted_at": {"$exists": False}}
-            cursor = self.store.playlists.find(query).sort("updated_at", DESCENDING).limit(limit)
+            cursor = self.store.playlists.find({
+                "collaborators.user_id": user_id,
+                "deleted_at": {"$exists": False},
+            }).sort(
+                "updated_at",
+                DESCENDING,
+            ).limit(limit)
+
+            results = [
+                await self.store.playlist_payload(doc, user_id)
+                async for doc in cursor
+            ]
+
         elif scope == "following":
-            followed = [d["playlist_id"] async for d in self.store.playlist_follows.find({"user_id": user_id}).limit(200)]
+            followed = [
+                item["playlist_id"]
+                async for item in self.store.playlist_follows.find({
+                    "user_id": user_id,
+                }).limit(200)
+            ]
+
             cursor = self.store.playlists.find({
                 "_id": {"$in": followed},
                 "visibility": {"$in": ["public", "unlisted"]},
                 "deleted_at": {"$exists": False},
-            }).sort("updated_at", DESCENDING).limit(limit)
-        elif scope == "discover":
-            cursor = self.store.playlists.find({"visibility": "public", "deleted_at": {"$exists": False}}).sort("updated_at", DESCENDING).limit(limit)
+            }).sort(
+                "updated_at",
+                DESCENDING,
+            ).limit(limit)
+
+            results = [
+                await self.store.playlist_payload(doc, user_id)
+                async for doc in cursor
+            ]
+
+        elif scope in {"discover", "trending", "fresh"}:
+            cursor = self.store.playlists.find({
+                "visibility": "public",
+                "deleted_at": {"$exists": False},
+            }).sort(
+                "updated_at",
+                DESCENDING,
+            ).limit(
+                min(100, max(30, limit * 4))
+            )
+
+            documents = [doc async for doc in cursor]
+
+            if scope == "fresh":
+                results = [
+                    await self.store.playlist_payload(doc, user_id)
+                    for doc in documents[:limit]
+                ]
+            else:
+                results = await self._public_playlist_results(
+                    documents,
+                    user_id,
+                    limit,
+                )
+
         else:
             raise APIError("invalid_playlist_scope", 400)
-        results = [await self.store.playlist_payload(doc, user_id) async for doc in cursor]
-        return web.json_response({"ok": True, "results": results})
+
+        return web.json_response({
+            "ok": True,
+            "results": results,
+        })
+
 
     async def get_playlist(self, request: web.Request):
         user_id = int(request["telegram_user"]["id"])
@@ -596,6 +800,8 @@ class SocialAPI:
         if not await self.store.can_view_playlist(doc, user_id):
             raise APIError("private_playlist", 403)
         return web.json_response({"ok": True, "playlist": await self.store.playlist_payload(doc, user_id, include_tracks=True)})
+
+
 
     async def update_playlist(self, request: web.Request):
         user_id = int(request["telegram_user"]["id"])
@@ -767,19 +973,54 @@ class SocialAPI:
         await self.store.playlist_likes.delete_one({"user_id": user_id, "playlist_id": playlist_id})
         return web.json_response({"ok": True, "liked": False})
 
+
     async def search_playlists(self, request: web.Request):
         user_id = int(request["telegram_user"]["id"])
-        query = clean_text(request.query.get("q", ""), 80, allow_empty=False)
+
+        query = clean_text(
+            request.query.get("q", ""),
+            80,
+            allow_empty=False,
+        )
+
         if len(query) < 2:
             raise APIError("query_too_short", 400)
-        pattern = re.compile(re.escape(query), re.IGNORECASE)
+
+        pattern = re.compile(
+            re.escape(query),
+            re.IGNORECASE,
+        )
+
         cursor = self.store.playlists.find({
             "visibility": "public",
             "deleted_at": {"$exists": False},
-            "name": pattern,
-        }).sort("updated_at", DESCENDING).limit(page_size(request))
-        results = [await self.store.playlist_payload(doc, user_id) async for doc in cursor]
-        return web.json_response({"ok": True, "results": results})
+            "$or": [
+                {"name": pattern},
+                {"description": pattern},
+                {"tracks.title": pattern},
+                {"tracks.artist": pattern},
+            ],
+        }).sort(
+            "updated_at",
+            DESCENDING,
+        ).limit(
+            min(100, page_size(request) * 3)
+        )
+
+        documents = [doc async for doc in cursor]
+
+        results = await self._public_playlist_results(
+            documents,
+            user_id,
+            page_size(request),
+            query=query,
+        )
+
+        return web.json_response({
+            "ok": True,
+            "results": results,
+        })
+
 
     async def like_track(self, request: web.Request):
         user_id = int(request["telegram_user"]["id"])

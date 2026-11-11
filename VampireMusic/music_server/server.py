@@ -14,15 +14,10 @@ from urllib.parse import parse_qsl
 import aiohttp
 from aiohttp import web
 
-from VampireMusic import app, config, yt
-from VampireMusic.core.youtube import VIDEO_ID_RE
-
-
 from VampireMusic import app, config, yt, db
+from VampireMusic.core.youtube import VIDEO_ID_RE
 from VampireMusic.music_server.social import register_social_routes
 from VampireMusic.music_server.group_api import register_group_routes
-
-
 
 
 logger = logging.getLogger("VampireMusic.music_server")
@@ -471,9 +466,6 @@ async def create_stream_token(request):
 
 
 
-
-
-
 def create_app():
     application = web.Application(
         middlewares=[
@@ -483,29 +475,27 @@ def create_app():
         client_max_size=MAX_REQUEST_SIZE,
     )
 
-social_store = register_social_routes(application, db.db)
-register_group_routes(application, social_store)
-
+    social_store = register_social_routes(application, db.db)
+    register_group_routes(application, social_store)
 
     application.router.add_get("/health", health)
     application.router.add_get("/music", music_page)
     application.router.add_get("/music/", music_page)
+
     application.router.add_get("/api/me", get_me)
     application.router.add_post("/api/search", search_tracks)
-    application.router.add_get("/api/stream/{video_id}", stream_track)
+    application.router.add_post(
+        "/api/stream-token",
+        create_stream_token,
+    )
+    application.router.add_get(
+        "/api/stream/{video_id}",
+        stream_track,
+    )
     application.router.add_get(
         "/api/groups/{chat_id}/membership",
         check_group_membership,
     )
-
-    application.router.add_post(
-    "/api/stream-token",
-    create_stream_token,
-)
-
-
-
-
 
     return application
 

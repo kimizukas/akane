@@ -103,24 +103,45 @@ def make_stream_token(user_id: int, video_id: str, expires: int):
     return f"{user_id}.{expires}.{signature}"
 
 
+
+
+
 def verify_stream_token(video_id: str, token: str):
     try:
         user_id_text, expires_text, signature = token.split(".", 2)
+
         user_id = int(user_id_text)
         expires = int(expires_text)
         now = int(time.time())
 
-        if expires < now or expires > now + 3600:
+        max_lifetime = 6 * 60 * 60
+
+        if user_id <= 0 or expires <= now:
             return None
 
-        expected = make_stream_token(user_id, video_id, expires)
+        if expires > now + max_lifetime:
+            return None
+
+        expected = make_stream_token(
+            user_id,
+            video_id,
+            expires,
+        )
+
         expected_signature = expected.rsplit(".", 1)[-1]
 
-        if not hmac.compare_digest(expected_signature, signature):
+        if not hmac.compare_digest(
+            expected_signature,
+            signature,
+        ):
             return None
+
         return user_id
+
     except (ValueError, TypeError):
         return None
+
+
 
 
 def _audio_content_type(ext: str):

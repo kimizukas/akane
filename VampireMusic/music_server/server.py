@@ -209,6 +209,8 @@ async def get_me(request):
     })
 
 
+
+
 async def search_tracks(request):
     user = request["telegram_user"]
 
@@ -244,15 +246,14 @@ async def search_tracks(request):
             token = make_stream_token(user["id"], track.id, expires)
 
             results.append({
-                "id": track.id,
-                "title": track.title,
-                "artist": track.channel_name or "Unknown artist",
-                "duration": track.duration,
-                "duration_sec": track.duration_sec,
-                "thumbnail": track.thumbnail,
-                "url": track.url,
-                "stream_url": f"/api/stream/{track.id}?token={token}",
-            })
+    "id": track.id,
+    "title": track.title,
+    "artist": track.channel_name or "Unknown artist",
+    "duration": track.duration,
+    "duration_sec": track.duration_sec,
+    "thumbnail": track.thumbnail,
+    "url": track.url,
+})
 
         return web.json_response({"ok": True, "results": results})
 
@@ -262,6 +263,9 @@ async def search_tracks(request):
             {"ok": False, "error": "search_failed"},
             status=500,
         )
+
+
+
 
 
 

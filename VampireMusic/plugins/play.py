@@ -129,34 +129,25 @@ async def play_hndlr(
             )
         )
 
+    # YouTube-only playback logging. No Lily/NexGen provider handling.
     if await db.is_logger():
-        from VampireMusic.core.lily import mask_key
+        api_key = config.API_KEY or ""
 
-        src = getattr(file, "source", None)
-
-        if src == "lily":
-            prov = "lily"
-            key = config.LILY_API_KEY
-            plat = config.LILY_PLATFORM
-
-        elif src == "nexgen":
-            prov = "nexgen"
-            key = config.LILY_FALLBACK_KEY
-            plat = config.LILY_PLATFORM
-
+        if len(api_key) > 10:
+            masked_key = f"{api_key[:6]}…{api_key[-4:]}"
+        elif api_key:
+            masked_key = api_key[:2] + "***"
         else:
-            prov = "youtube"
-            key = config.API_KEY
-            plat = "youtube"
+            masked_key = "<unset>"
 
         await utils.play_log(
             m,
             sent.link,
             file.title,
             file.duration,
-            prov,
-            mask_key(key),
-            plat,
+            "youtube",
+            masked_key,
+            "youtube",
         )
 
     file.user = mention
@@ -214,7 +205,7 @@ async def play_hndlr(
             return
 
     # Existing local files are reused.
-    # Audio is no longer downloaded before playback.
+    # Audio is streamed directly by VampireMusic.play_media().
     if not file.file_path:
         fname = f"downloads/{file.id}.{'mp4' if video else 'webm'}"
 
@@ -234,8 +225,6 @@ async def play_hndlr(
                     m.lang["error_no_file"].format(config.SUPPORT_CHAT)
                 )
 
-    # Audio Track with no file_path is resolved and streamed
-    # directly inside VampireMusic.play_media().
     await VampireMusic.play_media(
         chat_id=m.chat.id,
         message=sent,

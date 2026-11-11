@@ -1,4 +1,3 @@
-
 import asyncio
 import hashlib
 import hmac
@@ -770,7 +769,7 @@ async def recommendations(request):
     })
 
 
-  
+
 
 
 
@@ -1106,10 +1105,6 @@ async def upload_cover(request):
     })
 
 
-
-
-
-
 async def stream_track(request):
     video_id = request.match_info["video_id"]
     token = request.query.get("token", "")
@@ -1119,17 +1114,20 @@ async def stream_track(request):
             text="Invalid video ID."
         )
 
-    if not verify_stream_token(video_id, token):
+    user_id = verify_stream_token(video_id, token)
+
+    if not user_id:
         raise web.HTTPForbidden(
             text="Invalid or expired stream token."
         )
 
     range_header = request.headers.get("Range")
+    if_range = request.headers.get("If-Range")
 
     timeout = aiohttp.ClientTimeout(
         total=None,
         connect=15,
-        sock_read=60,
+        sock_read=90,
     )
 
     response = None
@@ -1158,12 +1156,16 @@ async def stream_track(request):
                 if range_header:
                     headers["Range"] = range_header
 
+                if if_range:
+                    headers["If-Range"] = if_range
+
                 async with session.get(
                     stream["url"],
                     headers=headers,
                     allow_redirects=True,
                 ) as upstream:
 
+                    # Signed CDN URLs can expire. Refresh once.
                     if upstream.status in {401, 403, 410}:
                         logger.warning(
                             "Audio CDN returned HTTP %s for %s "
@@ -1173,6 +1175,28 @@ async def stream_track(request):
                             attempt + 1,
                         )
                         continue
+
+                    # Preserve range failure information so the
+                    # browser can handle an invalid seek range.
+                    if upstream.status == 416:
+                        range_error_headers = {
+                            "Accept-Ranges": "bytes",
+                            "Cache-Control": "private, no-store",
+                        }
+
+                        content_range = upstream.headers.get(
+                            "Content-Range"
+                        )
+
+                        if content_range:
+                            range_error_headers["Content-Range"] = (
+                                content_range
+                            )
+
+                        return web.Response(
+                            status=416,
+                            headers=range_error_headers,
+                        )
 
                     if upstream.status >= 400:
                         logger.warning(
@@ -1199,6 +1223,7 @@ async def stream_track(request):
                         ),
                         "Cache-Control": "private, no-store",
                         "X-Content-Type-Options": "nosniff",
+                        "X-Accel-Buffering": "no",
                         "Accept-Ranges": upstream.headers.get(
                             "Accept-Ranges",
                             "bytes",
@@ -1243,8 +1268,8 @@ async def stream_track(request):
         raise
 
     except ConnectionResetError:
-        # The browser/WebView closed its audio connection.
-        # Do not turn this normal cancellation into an aiohttp ERROR.
+        # The WebView closed the audio request, for example after
+        # the user selected a different track.
         logger.debug(
             "Mini App audio client disconnected: %s",
             video_id,
@@ -1255,7 +1280,7 @@ async def stream_track(request):
 
         return web.Response(status=499)
 
-    except aiohttp.ClientConnectionError:
+    except (aiohttp.ClientConnectionError, asyncio.TimeoutError):
         if response is not None and response.prepared:
             logger.warning(
                 "Audio upstream connection ended after streaming began: %s",
@@ -1288,6 +1313,7 @@ async def stream_track(request):
         raise web.HTTPBadGateway(
             text="Unable to start audio stream."
         )
+
 
 
 
@@ -1426,7 +1452,6 @@ async def create_stream_token(request):
 
     try:
         data = await request.json()
-
     except Exception:
         return web.json_response(
             {
@@ -1445,7 +1470,7 @@ async def create_stream_token(request):
             status=400,
         )
 
-    video_id = str(data.get("video_id", ""))
+    video_id = str(data.get("video_id", "")).strip()
 
     if not VIDEO_ID_RE.fullmatch(video_id):
         return web.json_response(
@@ -1456,7 +1481,31 @@ async def create_stream_token(request):
             status=400,
         )
 
-    expires = int(time.time()) + 900
+    # Resolve and cache the upstream audio source before issuing
+    # a playable URL. The stream proxy then reuses yt.stream() cache.
+    try:
+        stream = await yt.stream(video_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Mini App stream preflight failed for %s: %s",
+            video_id,
+            type(exc).__name__,
+        )
+        stream = None
+
+    if not stream or not stream.get("url"):
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "stream_unavailable",
+            },
+            status=502,
+        )
+
+    # verify_stream_token() allows a maximum lifetime of 6 hours.
+    expires = int(time.time()) + (6 * 60 * 60)
 
     token = make_stream_token(
         int(user["id"]),
@@ -1469,6 +1518,8 @@ async def create_stream_token(request):
         "stream_url": f"/api/stream/{video_id}?token={token}",
         "expires_at": expires,
     })
+
+
 
 
 def create_app():

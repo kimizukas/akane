@@ -17,6 +17,14 @@ from aiohttp import web
 from VampireMusic import app, config, yt
 from VampireMusic.core.youtube import VIDEO_ID_RE
 
+
+from VampireMusic import app, config, yt, db
+from VampireMusic.music_server.social import register_social_routes
+from VampireMusic.music_server.group_api import register_group_routes
+
+
+
+
 logger = logging.getLogger("VampireMusic.music_server")
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -425,6 +433,47 @@ async def check_group_membership(request):
     })
 
 
+
+
+
+async def create_stream_token(request):
+    user = request["telegram_user"]
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {"ok": False, "error": "invalid_json"},
+            status=400,
+        )
+
+    video_id = str(data.get("video_id", ""))
+
+    if not VIDEO_ID_RE.fullmatch(video_id):
+        return web.json_response(
+            {"ok": False, "error": "invalid_video_id"},
+            status=400,
+        )
+
+    expires = int(time.time()) + 900
+    token = make_stream_token(
+        int(user["id"]),
+        video_id,
+        expires,
+    )
+
+    return web.json_response({
+        "ok": True,
+        "stream_url": f"/api/stream/{video_id}?token={token}",
+        "expires_at": expires,
+    })
+
+
+
+
+
+
+
 def create_app():
     application = web.Application(
         middlewares=[
@@ -433,6 +482,10 @@ def create_app():
         ],
         client_max_size=MAX_REQUEST_SIZE,
     )
+
+social_store = register_social_routes(application, db.db)
+register_group_routes(application, social_store)
+
 
     application.router.add_get("/health", health)
     application.router.add_get("/music", music_page)
@@ -444,6 +497,15 @@ def create_app():
         "/api/groups/{chat_id}/membership",
         check_group_membership,
     )
+
+    application.router.add_post(
+    "/api/stream-token",
+    create_stream_token,
+)
+
+
+
+
 
     return application
 

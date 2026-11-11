@@ -405,72 +405,74 @@ class YouTubeAPI:
 
 
 
+
     async def stream(self, video_id: str, force_refresh: bool = False):
-    video_id = extract_video_id(video_id)
+        video_id = extract_video_id(video_id)
 
-    if not video_id:
-        return None
+        if not video_id:
+            return None
 
-    request_started = time.monotonic()
+        request_started = time.monotonic()
 
-    if force_refresh:
-        invalidate_stream_cache(video_id)
+        if force_refresh:
+            invalidate_stream_cache(video_id)
 
-    lock = _get_stream_lock(video_id)
+        lock = _get_stream_lock(video_id)
 
-    async with lock:
-        now = time.monotonic()
-        cached = _STREAM_CACHE.get(video_id)
+        async with lock:
+            now = time.monotonic()
+            cached = _STREAM_CACHE.get(video_id)
 
-        if cached and cached["expires"] > now:
-            # A forced refresh may reuse a result produced by another
-            # refresh request that started while this request was waiting.
-            if (
-                not force_refresh
-                or cached.get("created_at", 0) >= request_started
-            ):
+            if cached and cached["expires"] > now:
+                if (
+                    not force_refresh
+                    or cached.get("created_at", 0) >= request_started
+                ):
+                    return {
+                        "url": cached["url"],
+                        "headers": cached["headers"],
+                        "ext": cached.get("ext") or "webm",
+                    }
+
+            if cached:
+                _STREAM_CACHE.pop(video_id, None)
+
+            try:
+                async with _STREAM_RESOLVE_SEMAPHORE:
+                    data = await asyncio.to_thread(
+                        _resolve_audio_stream,
+                        video_id,
+                    )
+
+                if not data or not data.get("url"):
+                    return None
+
+                _cache_stream({
+                    "id": video_id,
+                    "url": data["url"],
+                    "headers": data.get("headers") or {},
+                    "ext": data.get("ext") or "webm",
+                })
+
                 return {
-                    "url": cached["url"],
-                    "headers": cached["headers"],
-                    "ext": cached.get("ext") or "webm",
+                    "url": data["url"],
+                    "headers": data.get("headers") or {},
+                    "ext": data.get("ext") or "webm",
                 }
 
-        if cached:
-            _STREAM_CACHE.pop(video_id, None)
+            except asyncio.CancelledError:
+                raise
 
-        try:
-            async with _STREAM_RESOLVE_SEMAPHORE:
-                data = await asyncio.to_thread(
-                    _resolve_audio_stream,
+            except Exception as exc:
+                logger.warning(
+                    "Audio stream resolution failed for %s: %s",
                     video_id,
+                    type(exc).__name__,
                 )
-
-            if not data or not data.get("url"):
                 return None
+                
 
-            _cache_stream({
-                "id": video_id,
-                "url": data["url"],
-                "headers": data.get("headers") or {},
-                "ext": data.get("ext") or "webm",
-            })
 
-            return {
-                "url": data["url"],
-                "headers": data.get("headers") or {},
-                "ext": data.get("ext") or "webm",
-            }
-
-        except asyncio.CancelledError:
-            raise
-
-        except Exception as exc:
-            logger.warning(
-                "Audio stream resolution failed for %s: %s",
-                video_id,
-                type(exc).__name__,
-            )
-            return None
 
 
 

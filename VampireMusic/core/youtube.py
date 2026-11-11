@@ -1,3 +1,4 @@
+
 import asyncio
 import logging
 import os
@@ -15,8 +16,6 @@ from pyrogram.types import Message
 
 from py_yt import VideosSearch
 
-
-
 from VampireMusic.helpers import Track
 
 logger = logging.getLogger(__name__)
@@ -33,11 +32,9 @@ _STREAM_CACHE = {}
 _STREAM_CACHE_TTL = 90
 _STREAM_CACHE_MAX = 256
 
-# Same video ID must never trigger duplicate yt-dlp extraction.
 _STREAM_LOCKS = {}
 _STREAM_LOCKS_MAX = 512
 
-# Limit simultaneous YouTube extraction across VC and Mini App.
 _STREAM_RESOLVE_SEMAPHORE = asyncio.Semaphore(2)
 
 
@@ -107,8 +104,11 @@ def _ydl_options(download: bool = False, video: bool = False) -> dict:
         "overwrites": False,
     }
 
-    if COOKIES_FILE.is_file() and COOKIES_FILE.stat().st_size:
-        options["cookiefile"] = str(COOKIES_FILE)
+    try:
+        if COOKIES_FILE.is_file() and COOKIES_FILE.stat().st_size > 0:
+            options["cookiefile"] = str(COOKIES_FILE)
+    except OSError:
+        logger.warning("Unable to access YouTube cookies file.")
 
     if download:
         options.update({
@@ -135,7 +135,6 @@ def _get_stream_lock(video_id: str) -> asyncio.Lock:
         lock = asyncio.Lock()
         _STREAM_LOCKS[video_id] = lock
 
-    # Remove idle locks when the registry grows.
     if len(_STREAM_LOCKS) > _STREAM_LOCKS_MAX:
         for key, old_lock in list(_STREAM_LOCKS.items()):
             if key == video_id:
@@ -148,8 +147,6 @@ def _get_stream_lock(video_id: str) -> asyncio.Lock:
                 break
 
     return lock
-
-
 
 
 def invalidate_stream_cache(video_id: str) -> None:
@@ -189,20 +186,8 @@ def _cache_stream(data: dict):
         _STREAM_CACHE.pop(next(iter(_STREAM_CACHE)))
 
 
-
 def _resolve_audio_stream(video_id: str):
     source = YOUTUBE_URL.format(video_id)
-
-    # android_vr does not require a GVS PO Token.
-    # Override with YTDLP_PLAYER_CLIENT when another client is needed.
-    clients = [
-        item.strip()
-        for item in os.getenv(
-            "YTDLP_PLAYER_CLIENT",
-            "android_vr",
-        ).split(",")
-        if item.strip()
-    ]
 
     options = _ydl_options()
 
@@ -212,24 +197,35 @@ def _resolve_audio_stream(video_id: str):
         "ignoreerrors": False,
         "noplaylist": True,
         "extract_flat": False,
-        "socket_timeout": 12,
-        "retries": 1,
-        "fragment_retries": 1,
-        "extractor_retries": 1,
-        "format": "bestaudio[acodec=opus]/bestaudio",
+        "socket_timeout": 15,
+        "retries": 2,
+        "fragment_retries": 2,
+        "extractor_retries": 2,
+        "format": "bestaudio/best",
     })
 
-    if clients:
+    # Do not force android_vr as the default client.
+    # Let yt-dlp select its supported clients so cookie authentication
+    # can be used by the YouTube extractor.
+    configured_clients = [
+        item.strip()
+        for item in os.getenv("YTDLP_PLAYER_CLIENT", "").split(",")
+        if item.strip()
+    ]
+
+    has_cookies = (
+        COOKIES_FILE.is_file()
+        and COOKIES_FILE.stat().st_size > 0
+    )
+
+    # Explicit player client overrides are only applied without cookies.
+    # When cookies exist, keep yt-dlp's normal client selection.
+    if configured_clients and not has_cookies:
         options["extractor_args"] = {
             "youtube": {
-                "player_client": clients,
+                "player_client": configured_clients,
             },
         }
-
-    # android_vr is intentionally used without account cookies.
-    # Other configured clients can use the existing cookies.txt.
-    if clients == ["android_vr"]:
-        options.pop("cookiefile", None)
 
     with yt_dlp.YoutubeDL(options) as ydl:
         info = ydl.extract_info(
@@ -245,8 +241,6 @@ def _resolve_audio_stream(video_id: str):
         "headers": info.get("http_headers") or {},
         "ext": info.get("ext") or "webm",
     }
-
-
 
 
 def _make_track(
@@ -283,7 +277,6 @@ def _make_track(
         video=video,
         view_count=str(data.get("view_count") or ""),
     )
-
 
 
 async def _fast_search_tracks(
@@ -403,9 +396,6 @@ class YouTubeAPI:
         self.status = "https://www.youtube.com/oembed?url="
         self.listbase = "https://youtube.com/playlist?list="
 
-
-
-
     async def stream(self, video_id: str, force_refresh: bool = False):
         video_id = extract_video_id(video_id)
 
@@ -470,11 +460,6 @@ class YouTubeAPI:
                     type(exc).__name__,
                 )
                 return None
-                
-
-
-
-
 
     async def save_cookies(self, source: str) -> bool:
         if not source:
@@ -552,8 +537,6 @@ class YouTubeAPI:
 
         return None
 
-
-
     async def search(
         self,
         query: str,
@@ -565,7 +548,6 @@ class YouTubeAPI:
         if not query:
             return None
 
-        # Song name: fast asynchronous search.
         if not extract_video_id(query):
             try:
                 tracks = await _fast_search_tracks(
@@ -583,7 +565,6 @@ class YouTubeAPI:
                 )
                 return None
 
-        # Direct YouTube URL or video ID.
         try:
             info = await asyncio.to_thread(
                 _extract_info,
@@ -608,12 +589,6 @@ class YouTubeAPI:
                 type(exc).__name__,
             )
             return None
-
-
-
-
-
-
 
     async def search_multi(
         self,
@@ -649,12 +624,6 @@ class YouTubeAPI:
                 query,
             )
             return []
-
-
-
-
-
-
 
     async def playlist(
         self,

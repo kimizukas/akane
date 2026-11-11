@@ -416,6 +416,7 @@ async def _gemini_recommendation_queries(history):
         return []
 
 
+
 async def recommendations(request):
     store = request.app.get("social_store")
 
@@ -434,7 +435,13 @@ async def recommendations(request):
         "_id": user_id,
     }) or {}
 
-    history = history_doc.get("items", [])
+    raw_history = history_doc.get("items", [])
+
+    history = [
+        item
+        for item in raw_history
+        if isinstance(item, dict)
+    ]
 
     liked_cursor = store.track_likes.find({
         "user_id": user_id,
@@ -446,7 +453,14 @@ async def recommendations(request):
     liked = [
         item.get("track", {})
         async for item in liked_cursor
+        if isinstance(item.get("track"), dict)
     ]
+
+    liked_ids = {
+        str(item.get("id", "")).strip()
+        for item in liked
+        if item.get("id")
+    }
 
     seeds = []
     seen = set()
@@ -460,24 +474,38 @@ async def recommendations(request):
         seen.add(track_id)
         seeds.append(item)
 
-    queries = await _gemini_recommendation_queries(
-        seeds
-    )
+    queries = await _gemini_recommendation_queries(seeds)
 
+    # Build fallback queries from multiple recent artists/tracks,
+    # rather than relying only on the very first history item.
     if not queries and seeds:
-        first = seeds[0]
-        title = str(first.get("title", "")).strip()
-        artist = str(first.get("artist", "")).strip()
+        fallback_queries = []
+        seen_queries = set()
 
-        if artist and artist.lower() != "unknown artist":
-            queries = [
-                f"songs similar to {title} by {artist}",
-                f"new songs by {artist}",
-            ]
-        else:
-            queries = [
-                f"songs similar to {title}",
-            ]
+        for item in seeds[:8]:
+            title = str(item.get("title", "")).strip()
+            artist = str(item.get("artist", "")).strip()
+
+            if not title:
+                continue
+
+            if artist and artist.lower() != "unknown artist":
+                query = f"songs similar to {title} by {artist}"
+            else:
+                query = f"songs similar to {title}"
+
+            key = query.casefold()
+
+            if key in seen_queries:
+                continue
+
+            seen_queries.add(key)
+            fallback_queries.append(query[:120])
+
+            if len(fallback_queries) >= 2:
+                break
+
+        queries = fallback_queries
 
     if not queries:
         language = str(
@@ -516,48 +544,216 @@ async def recommendations(request):
     )
 
     excluded = {
-        str(item.get("id", ""))
-        for item in seeds[:15]
+        str(item.get("id", "")).strip()
+        for item in seeds
+        if item.get("id")
     }
 
-    results = []
-    result_ids = set()
+    stop_words = {
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "song",
+        "songs",
+        "music",
+        "official",
+        "video",
+        "audio",
+        "lyrics",
+        "feat",
+        "ft",
+    }
 
-    for tracks in searches:
+    def word_tokens(value):
+        words = re.findall(
+            r"[^\W_]{2,}",
+            str(value or "").casefold(),
+        )
+
+        return {
+            word
+            for word in words
+            if word not in stop_words
+        }
+
+    artist_weights = {}
+    liked_artists = set()
+    seed_profiles = []
+
+    for index, item in enumerate(seeds[:20]):
+        track_id = str(item.get("id", "")).strip()
+
+        title = str(item.get("title", "")).strip()
+        artist = str(item.get("artist", "")).strip()
+
+        artist_key = artist.casefold().strip()
+
+        weight = 4.0 / (1.0 + index * 0.18)
+
+        if track_id in liked_ids:
+            weight += 2.0
+
+        if artist_key and artist_key != "unknown artist":
+            artist_weights[artist_key] = max(
+                artist_weights.get(artist_key, 0.0),
+                weight,
+            )
+
+            if track_id in liked_ids:
+                liked_artists.add(artist_key)
+
+        seed_profiles.append({
+            "tokens": word_tokens(title),
+            "weight": weight,
+        })
+
+    candidates = {}
+    order = 0
+
+    for query_index, tracks in enumerate(searches):
         if isinstance(tracks, Exception):
             continue
 
-        for track in tracks or []:
-            track_id = str(getattr(track, "id", ""))
+        for rank, track in enumerate(tracks or []):
+            track_id = str(
+                getattr(track, "id", "") or ""
+            ).strip()
 
             if (
                 not VIDEO_ID_RE.fullmatch(track_id)
                 or track_id in excluded
-                or track_id in result_ids
             ):
                 continue
 
-            result_ids.add(track_id)
+            title = str(
+                getattr(track, "title", "") or ""
+            ).strip()
 
-            results.append({
+            artist = str(
+                getattr(track, "channel_name", "")
+                or "Unknown artist"
+            ).strip()
+
+            if not title:
+                continue
+
+            if track_id in candidates:
+                continue
+
+            artist_key = artist.casefold()
+
+            candidate_tokens = word_tokens(title)
+
+            artist_score = artist_weights.get(
+                artist_key,
+                0.0,
+            )
+
+            # Keep the search relevance as a baseline.
+            score = (
+                2.0 / (query_index + 1)
+                + max(0.0, 1.0 - rank / 10) * 0.5
+            )
+
+            # Prefer artists that repeatedly appear in the user's
+            # own listening and liked-song history.
+            score += artist_score * 1.15
+
+            if artist_key in liked_artists:
+                score += 1.0
+
+            # Compare the candidate title with recent listened songs.
+            similarity_score = 0.0
+
+            if candidate_tokens:
+                for profile in seed_profiles:
+                    seed_tokens = profile["tokens"]
+
+                    if not seed_tokens:
+                        continue
+
+                    union = candidate_tokens | seed_tokens
+                    intersection = candidate_tokens & seed_tokens
+
+                    similarity = (
+                        len(intersection) / len(union)
+                        if union
+                        else 0.0
+                    )
+
+                    weighted_similarity = (
+                        similarity * profile["weight"]
+                    )
+
+                    similarity_score = max(
+                        similarity_score,
+                        weighted_similarity,
+                    )
+
+            score += similarity_score * 1.5
+
+            duration_sec = int(
+                getattr(track, "duration_sec", 0) or 0
+            )
+
+            candidates[track_id] = {
                 "id": track_id,
-                "title": track.title,
-                "artist": (
-                    track.channel_name or "Unknown artist"
+                "title": title,
+                "artist": artist or "Unknown artist",
+                "duration": str(
+                    getattr(track, "duration", "") or ""
                 ),
-                "duration": track.duration,
-                "duration_sec": int(
-                    track.duration_sec or 0
-                ),
-                "thumbnail": track.thumbnail,
-                "url": track.url,
-            })
+                "duration_sec": duration_sec,
+                "thumbnail": getattr(track, "thumbnail", None),
+                "url": getattr(track, "url", None),
+                "_score": score,
+                "_order": order,
+            }
+
+            order += 1
+
+    ranked = sorted(
+        candidates.values(),
+        key=lambda item: (
+            -item["_score"],
+            item["_order"],
+        ),
+    )
+
+    # Avoid showing too many tracks from the same artist in a row.
+    results = []
+    deferred = []
+    artist_counts = {}
+
+    for item in ranked:
+        artist = item["artist"].casefold().strip()
+
+        if not artist or artist == "unknown artist":
+            artist = f"unknown:{item['id']}"
+
+        if artist_counts.get(artist, 0) >= 2:
+            deferred.append(item)
+            continue
+
+        results.append(item)
+        artist_counts[artist] = artist_counts.get(artist, 0) + 1
+
+        if len(results) >= 16:
+            break
+
+    if len(results) < 16:
+        for item in deferred:
+            results.append(item)
 
             if len(results) >= 16:
                 break
 
-        if len(results) >= 16:
-            break
+    # Internal ranking values must never be sent to the browser.
+    for item in results:
+        item.pop("_score", None)
+        item.pop("_order", None)
 
     personalized = bool(seeds)
 
@@ -566,11 +762,18 @@ async def recommendations(request):
         "results": results,
         "personalized": personalized,
         "reason": (
-            "Based on your recent listening and liked songs."
+            "Ranked using your recent listening, liked songs "
+            "and artist preferences."
             if personalized
             else "Start listening and liking songs to build your personal mix."
         ),
     })
+
+
+  
+
+
+
 
 async def health(request):
     return web.json_response({

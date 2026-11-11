@@ -8,160 +8,139 @@
 
   const state = {
     page: "home",
+
     profile: null,
+    activePerson: null,
+    activePlaylist: null,
+
     playlists: [],
     discover: [],
     liked: [],
     likedLoaded: false,
     notifications: [],
+
     searchMode: "music",
     searchQuery: "",
     searchResults: [],
+    searchRequest: 0,
+
     libraryScope: "mine",
-    activePlaylist: null,
-    activePerson: null,
+
     selectedGroup: null,
     groupStatus: null,
-    addTargetPlaylist: null,
+
+    currentTrack: null,
     queue: [],
     queueIndex: -1,
-    currentTrack: null,
-    shuffle: false,
-    repeat: false,
-    dragId: null,
-    modalTrack: null,
-    modalPeople: [],
-    selectedInvite: null,
-    searchRequest: 0,
-    playbackRequest: 0,
 
+    playbackRequest: 0,
+    playbackLoading: false,
+
+    shuffle: false,
+    shuffleBag: [],
+    repeatMode: 0,
+
+    homeRendered: false,
     homeTracks: [],
-    homeQuery: "popular Hindi songs",
     homeLoadedAt: 0,
-    homeRequest: 0
+    homeFeedLoadedAt: 0,
+    homeRequest: 0,
+
+    modalTrack: null,
+    addTargetPlaylist: null,
+    selectedInvite: null,
+    modalPeople: [],
+
+    dragId: null,
+
+    lastHistoryTrackId: "",
+    lastHistoryAt: 0
   };
 
   let searchTimer = null;
+  let toastTimer = null;
+  let groupRefreshTimer = null;
+
   const previewObjectUrls = new Map();
+
   const UPLOAD_FIELDS = {
-    newPlaylistCoverFile: { preview: "newPlaylistCoverPreview", wrap: "newPlaylistCoverPreviewWrap", progress: "newPlaylistCoverProgress", progressWrap: "newPlaylistCoverProgressWrap", status: "newPlaylistCoverStatus" },
-    editPlaylistCoverFile: { preview: "editPlaylistCoverPreview", wrap: "editPlaylistCoverPreviewWrap", progress: "editPlaylistCoverProgress", progressWrap: "editPlaylistCoverProgressWrap", status: "editPlaylistCoverStatus" },
-    profileAvatarFile: { preview: "profileAvatarPreview", wrap: "profileAvatarPreviewWrap", progress: "profileAvatarProgress", progressWrap: "profileAvatarProgressWrap", status: "profileAvatarStatus" }
+    newPlaylistCoverFile: {
+      preview: "newPlaylistCoverPreview",
+      previewWrap: "newPlaylistCoverPreviewWrap",
+      status: "newPlaylistCoverStatus",
+      progress: "newPlaylistCoverProgress",
+      progressWrap: "newPlaylistCoverProgressWrap"
+    },
+
+    editPlaylistCoverFile: {
+      preview: "editPlaylistCoverPreview",
+      previewWrap: "editPlaylistCoverPreviewWrap",
+      status: "editPlaylistCoverStatus",
+      progress: "editPlaylistCoverProgress",
+      progressWrap: "editPlaylistCoverProgressWrap"
+    },
+
+    profileAvatarFile: {
+      preview: "profileAvatarPreview",
+      previewWrap: "profileAvatarPreviewWrap",
+      status: "profileAvatarStatus",
+      progress: "profileAvatarProgress",
+      progressWrap: "profileAvatarProgressWrap"
+    }
   };
 
   const ICONS = {
     music: '<path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle>',
-    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path>',
-    home: '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"></path>',
+
     search: '<circle cx="10.8" cy="10.8" r="7.2"></circle><path d="m16.2 16.2 4.3 4.3"></path>',
-    library: '<path d="M4 4h16v16H4z"></path><path d="M8 8h8M8 12h8M8 16h5"></path>',
+
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path>',
+
     user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
-    plus: '<path d="M12 5v14M5 12h14"></path>',
+
+    library: '<path d="M4 4h16v16H4z"></path><path d="M8 8h8M8 12h8M8 16h5"></path>',
+
     heart: '<path d="M20.8 8.8c0 5.2-8.8 11-8.8 11s-8.8-5.8-8.8-11A4.8 4.8 0 0 1 12 6.2a4.8 4.8 0 0 1 8.8 2.6Z"></path>',
+
     heartFill: '<path fill="currentColor" stroke="none" d="M20.8 8.8c0 5.2-8.8 11-8.8 11s-8.8-5.8-8.8-11A4.8 4.8 0 0 1 12 6.2a4.8 4.8 0 0 1 8.8 2.6Z"></path>',
+
     play: '<path fill="currentColor" stroke="none" d="M7 4.8c0-.8.9-1.3 1.6-.9l11 7.2a1.1 1.1 0 0 1 0 1.8l-11 7.2c-.7.4-1.6-.1-1.6-.9z"></path>',
+
     pause: '<path d="M8 5h3v14H8zM15 5h3v14h-3z"></path>',
+
     next: '<path d="M5 5v14l10-7zM19 5v14"></path>',
+
     previous: '<path d="M19 5v14L9 12zM5 5v14"></path>',
-    shuffle: '<path d="m16 3 4 4-4 4M4 17l5-5 3-3 4-3h4M16 17l4 4-4 4M4 7l5 5 3 3"></path>',
-    repeat: '<path d="m17 1 4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"></path>',
-    queue: '<path d="M4 6h16M4 12h16M4 18h10"></path>',
+
+    plus: '<path d="M12 5v14M5 12h14"></path>',
+
     close: '<path d="m6 6 12 12M18 6 6 18"></path>',
-    down: '<path d="m6 9 6 6 6-6"></path>',
-    up: '<path d="m6 15 6-6 6 6"></path>',
-    check: '<path d="m5 12 4 4L19 6"></path>',
-    grip: '<path d="M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01"></path>',
+
     refresh: '<path d="M20 7v5h-5"></path><path d="M20 12a8 8 0 1 1-2.3-5.7L20 9"></path>',
+
     upload: '<path d="M12 16V4m-5 5 5-5 5 5"></path><path d="M4 16v4h16v-4"></path>',
-    image: '<rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="m21 15-5-5L5 21"></path>',
-    star: '<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"></path>',
-    moon: '<path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5Z"></path>',
-    headphones: '<path d="M3 14v-3a9 9 0 0 1 18 0v3"></path><rect x="2" y="13" width="5" height="8" rx="2"></rect><rect x="17" y="13" width="5" height="8" rx="2"></rect>',
+
     trash: '<path d="M3 6h18M8 6V4h8v2m-10 0 1 14h10l1-14M10 10v6m4-6v6"></path>',
-    sparkle: '<path d="m12 3 1.5 6.5L20 12l-6.5 1.5L12 20l-1.5-6.5L4 12l6.5-2.5z"></path>',
+
+    check: '<path d="m5 12 4 4L19 6"></path>',
+
+    up: '<path d="m6 15 6-6 6 6"></path>',
+
+    down: '<path d="m6 9 6 6 6-6"></path>',
+
+    shuffle: '<path d="m16 3 4 4-4 4M4 17l5-5 3-3 4-3h4"></path><path d="m16 17 4 4-4 4M4 7l5 5 3 3"></path>',
+
+    repeat: '<path d="m17 1 4 4-4 4M3 11V9a4 4 0 0 1 4-4h14"></path><path d="m7 23-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"></path>',
+
+    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path>',
+
+    star: '<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"></path>',
+
+    moon: '<path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5Z"></path>',
+
+    headphones: '<path d="M3 14v-3a9 9 0 0 1 18 0v3"></path><rect x="2" y="13" width="5" height="8" rx="2"></rect><rect x="17" y="13" width="5" height="8" rx="2"></rect>',
+
     globe: '<circle cx="12" cy="12" r="10"></circle><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"></path>'
-  };
-
-  function svgIcon(name, size = 18) {
-    const paths = ICONS[name] || ICONS.music;
-
-    return `
-      <svg
-        class="svg-icon"
-        width="${Number(size) || 18}"
-        height="${Number(size) || 18}"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >${paths}</svg>
-    `;
-  }
-
-  function playlistIcon(value, size = 24) {
-    const aliases = {
-      music: "music",
-      heart: "heart",
-      chill: "moon",
-      star: "star",
-      headphones: "headphones",
-      group: "users"
-    };
-
-    const iconName = aliases[String(value || "").toLowerCase()] || "music";
-    return svgIcon(iconName, size);
-  }
-
-  if (tg) {
-    tg.ready();
-    tg.expand();
-
-    try {
-      tg.setHeaderColor("#120e16");
-      tg.setBackgroundColor("#120e16");
-    } catch (_) {}
-  }
-
-  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  }[ch]));
-
-  const shortTime = value => {
-    const n = Math.max(0, Number(value) || 0);
-
-    return `${Math.floor(n / 60)}:${String(
-      Math.floor(n % 60)
-    ).padStart(2, "0")}`;
-  };
-
-  const img = (url, cls = "") => url
-    ? `<img class="${cls}" src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-    : `<div class="${cls} cover-placeholder">${svgIcon("music", 34)}</div>`;
-
-  const coverImage = (url, cls = "", fallback = "music") => url
-    ? `<img class="${cls}" src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-    : `<div class="${cls} cover-placeholder">${playlistIcon(fallback, 38)}</div>`;
-
-  const showToast = message => {
-    const el = $("toast");
-    if (!el) return;
-
-    el.textContent = String(message || "Something went wrong");
-    el.classList.add("show");
-
-    clearTimeout(showToast.timer);
-
-    showToast.timer = setTimeout(() => {
-      el.classList.remove("show");
-    }, 2800);
   };
 
   const API_MESSAGES = {
@@ -169,40 +148,150 @@
     invalid_chat_id: "That Telegram group ID is invalid.",
     group_only: "Enter a Telegram supergroup ID.",
     supergroup_required: "This group must be a supergroup.",
-    bot_cannot_access_group: "The music bot is not in this group or cannot access it.",
+    bot_cannot_access_group: "The music bot cannot access this group.",
     assistant_unavailable: "The assigned music assistant is unavailable.",
-    userbot_cannot_verify_membership: "The assistant could not verify your group membership.",
+    userbot_cannot_verify_membership: "Assistant could not verify your membership.",
     not_group_member: "You are not a member of this group.",
     bot_not_in_group: "Add the music bot to this group first.",
-    assistant_not_in_group: "The assigned assistant account is not in this group.",
-    unable_to_verify_group_clients: "The bot and assistant membership could not be verified.",
-    group_control_permission_denied: "You can view this group, but you cannot control its playback.",
-    voice_chat_playback_not_started: "The voice chat is not active or playback could not start.",
+    assistant_not_in_group: "Assistant account is not in this group.",
+    unable_to_verify_group_clients: "Could not verify group playback clients.",
+    group_control_permission_denied: "You can view this group, but cannot control playback.",
+    voice_chat_playback_not_started: "Voice chat playback could not start.",
     nothing_playing: "Nothing is playing in this group.",
     already_paused: "Group playback is already paused.",
     already_playing: "Group playback is already playing.",
-    group_queue_limit: "The group queue is full.",
-    playlist_empty: "This playlist has no songs yet.",
-    duplicate_track: "This song is already in this playlist.",
-    playlist_track_limit: "This playlist has reached its track limit.",
-    playlist_version_conflict: "This playlist changed. Reload it and try again.",
-    playlist_changed_retry: "This playlist changed. Reload and try again.",
+    group_queue_limit: "Group queue is full.",
+    playlist_empty: "This playlist has no songs.",
+    duplicate_track: "This song is already in the playlist.",
+    playlist_track_limit: "Playlist has reached its song limit.",
+    playlist_version_conflict: "Playlist changed. Reload and try again.",
+    playlist_changed_retry: "Playlist changed. Reload and try again.",
     private_playlist: "You do not have access to this playlist.",
     private_playlist_cannot_be_followed: "Private playlists cannot be followed.",
-    permission_denied: "You do not have permission to perform this action.",
-    owner_only_visibility: "Only the playlist owner can change its visibility.",
+    permission_denied: "You do not have permission for this action.",
+    owner_only_visibility: "Only the playlist owner can change visibility.",
     collaborator_not_found: "That collaborator is no longer on this playlist.",
-    invitation_not_found: "This invitation is no longer available.",
+    invitation_not_found: "That invitation is no longer available.",
+    query_too_short: "Type at least two characters.",
     image_required: "Choose an image first.",
     image_too_large: "Image must be 5 MB or smaller.",
     unsupported_image: "Use a valid JPG, PNG or WebP image.",
-    catbox_unavailable: "Catbox is temporarily unavailable. Try again later.",
-    catbox_invalid_response: "Catbox returned an invalid upload response."
+    invalid_image: "Selected image could not be read.",
+    upload_rate_limited: "Wait a few seconds before uploading again.",
+    catbox_unavailable: "Catbox is temporarily unavailable.",
+    catbox_invalid_response: "Catbox returned an invalid response.",
+    catbox_rejected: "Catbox rejected this image.",
+    handle_taken: "This username is already taken.",
+    invalid_handle: "Use 3–24 letters, numbers or underscores.",
+    private_profile: "This profile is private."
   };
+
+  const esc = value => String(value ?? "").replace(
+    /[&<>"']/g,
+    character => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[character]
+  );
+
+  function icon(name, size = 18) {
+    return `
+      <svg
+        width="${Number(size) || 18}"
+        height="${Number(size) || 18}"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >${ICONS[name] || ICONS.music}</svg>
+    `;
+  }
+
+  function formatTime(value) {
+    const seconds = Math.max(
+      0,
+      Math.floor(Number(value) || 0)
+    );
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = seconds % 60;
+
+    if (hours > 0) {
+      return (
+        `${hours}:` +
+        `${String(minutes).padStart(2, "0")}:` +
+        `${String(remainder).padStart(2, "0")}`
+      );
+    }
+
+    return (
+      `${minutes}:` +
+      `${String(remainder).padStart(2, "0")}`
+    );
+  }
+
+  function getTrackDuration(track) {
+    const audioDuration = Number(audio.duration);
+
+    if (
+      Number.isFinite(audioDuration) &&
+      audioDuration > 0 &&
+      state.currentTrack &&
+      String(state.currentTrack.id) === String(track?.id)
+    ) {
+      return audioDuration;
+    }
+
+    return Math.max(
+      0,
+      Number(track?.duration_sec) || 0
+    );
+  }
+
+  function image(url, className = "") {
+    if (!url) {
+      return `
+        <div class="${esc(className)} cover-placeholder">
+          ${icon("music", 25)}
+        </div>
+      `;
+    }
+
+    return `
+      <img
+        class="${esc(className)}"
+        src="${esc(url)}"
+        alt=""
+        loading="lazy"
+        referrerpolicy="no-referrer"
+      >
+    `;
+  }
+
+  function showToast(message) {
+    const element = $("toast");
+    if (!element) return;
+
+    element.textContent = String(
+      message || "Something went wrong."
+    );
+
+    element.classList.add("show");
+
+    clearTimeout(toastTimer);
+
+    toastTimer = setTimeout(() => {
+      element.classList.remove("show");
+    }, 2800);
+  }
 
   async function api(path, options = {}) {
     if (!initData) {
-      throw new Error("Open Taalune from the Telegram bot to continue.");
+      throw new Error(
+        "Open Taalune from the Telegram bot to sign in."
+      );
     }
 
     const headers = {
@@ -222,15 +311,35 @@
       headers["Content-Type"] = "application/json";
     }
 
-    const response = await fetch(path, {
-      ...options,
-      headers
-    });
+    let response;
 
-    const contentType = response.headers.get("content-type") || "";
-    const data = contentType.includes("application/json")
-      ? await response.json()
-      : {};
+    try {
+      response = await fetch(path, {
+        ...options,
+        headers
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        throw error;
+      }
+
+      throw new Error(
+        "Network connection failed. Please try again."
+      );
+    }
+
+    const contentType =
+      response.headers.get("content-type") || "";
+
+    let data = {};
+
+    if (contentType.includes("application/json")) {
+      try {
+        data = await response.json();
+      } catch (_) {
+        data = {};
+      }
+    }
 
     if (!response.ok || data.ok === false) {
       const code = data.error || "";
@@ -239,81 +348,187 @@
         API_MESSAGES[code] ||
         data.message ||
         code ||
-        `Request failed (${response.status})`
+        `Request failed (${response.status}).`
       );
     }
 
     return data;
   }
 
-  function go(page) {
+  function closeAllOverlays() {
+    $("sheetOverlay")?.classList.remove("open");
+    $("queueOverlay")?.classList.remove("open");
+    $("fullPlayer")?.classList.remove("open");
+  }
+
+  function setPage(page) {
+    if (!$( `page-${page}` )) return;
+
+    const previous = state.page;
     state.page = page;
 
-    document.querySelectorAll(".page").forEach(el => {
-      el.classList.toggle("active", el.id === `page-${page}`);
+    document.querySelectorAll(".page").forEach(element => {
+      element.classList.toggle(
+        "active",
+        element.id === `page-${page}`
+      );
     });
 
-    document.querySelectorAll(".nav-btn").forEach(el => {
-      el.classList.toggle("active", el.dataset.page === page);
+    document.querySelectorAll(".nav-button").forEach(button => {
+      button.classList.toggle(
+        "active",
+        button.dataset.page === page
+      );
     });
 
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (previous !== page) {
+      window.scrollTo({
+        top: 0,
+        behavior: "auto"
+      });
+    }
 
-    if (page === "home") loadHome();
-    if (page === "library") loadLibrary();
-    if (page === "profile") renderProfile();
-    if (page === "notifications") loadNotifications();
-    if (page === "search") renderSearchShell();
-    if (page === "groups") renderGroups();
-    if (page === "playlist") renderPlaylist();
+    if (page === "home") {
+      loadHome(false);
+    }
+
+    if (page === "search") {
+      if (!$("searchInput")) {
+        renderSearchShell();
+      }
+    }
+
+    if (page === "library") {
+      if (!$("libraryItems")) {
+        renderLibrary();
+      }
+    }
+
+    if (page === "groups") {
+      renderGroups();
+    }
+
+    if (page === "profile") {
+      renderProfile();
+    }
+
+    if (page === "notifications") {
+      loadNotifications();
+    }
+
+    if (page === "playlist") {
+      renderPlaylist();
+    }
+
+    if (page === "person") {
+      renderPerson();
+    }
   }
 
   function setAvatar() {
-    const profile = state.profile;
-    const element = $("topAvatar");
+    const avatar = $("topAvatar");
+    const fallback = $("topAvatarFallback");
 
-    if (!element) return;
+    if (!avatar || !fallback) return;
 
-    element.src = profile?.avatar_url || "";
-    element.style.visibility = profile?.avatar_url ? "visible" : "hidden";
+    const url = state.profile?.avatar_url || "";
+
+    if (url) {
+      avatar.src = url;
+      avatar.hidden = false;
+      fallback.hidden = true;
+    } else {
+      avatar.removeAttribute("src");
+      avatar.hidden = true;
+
+      fallback.textContent = (
+        state.profile?.display_name?.[0] ||
+        "U"
+      ).toUpperCase();
+
+      fallback.hidden = false;
+    }
+  }
+
+  function isTrackLiked(trackId) {
+    return state.liked.some(
+      track => String(track.id) === String(trackId)
+    );
+  }
+
+  function findTrack(trackId) {
+    const sources = [
+      state.searchResults,
+      state.homeTracks,
+      state.liked,
+      state.activePlaylist?.tracks || [],
+      state.queue
+    ];
+
+    for (const source of sources) {
+      const track = source.find(
+        item => String(item.id) === String(trackId)
+      );
+
+      if (track) return track;
+    }
+
+    if (
+      state.currentTrack &&
+      String(state.currentTrack.id) === String(trackId)
+    ) {
+      return state.currentTrack;
+    }
+
+    return null;
   }
 
   function playlistCard(playlist) {
+    const owner = playlist.owner || {};
+    const isOwn = Number(owner.user_id) ===
+      Number(state.profile?.user_id);
+
     return `
       <article class="playlist-card">
-        <button class="ghost"
-          style="padding:0;width:100%;text-align:left"
+        <button
+          class="playlist-open"
           data-action="open-playlist"
-          data-id="${esc(playlist.id)}">
+          data-id="${esc(playlist.id)}"
+        >
+          ${image(playlist.cover_url, "playlist-cover")}
 
-          ${coverImage(
-            playlist.cover_url,
-            "cover",
-            playlist.icon
-          )}
-
-          <div class="card-title">${esc(playlist.name)}</div>
-
-          <div class="card-meta">
-            ${esc(playlist.visibility)}
-            · ${Number(playlist.track_count || 0)} songs
-          </div>
-        </button>
-
-        <div class="row" style="justify-content:space-between;margin-top:8px">
-          <span class="small muted">
-            ${svgIcon("heart", 13)}
-            ${Number(playlist.like_count || 0)}
+          <span class="playlist-title">
+            ${esc(playlist.name)}
           </span>
 
-          ${playlist.owner?.user_id === state.profile?.user_id ? "" : `
-            <button class="track-action"
+          <span class="playlist-owner">
+            by @${esc(owner.handle || "listener")}
+          </span>
+        </button>
+
+        <div class="playlist-stats">
+          <span>
+            ${Number(playlist.track_count || 0)} songs
+          </span>
+
+          <span>
+            ${icon("heart", 11)}
+            ${Number(playlist.like_count || 0)}
+          </span>
+        </div>
+
+        <div class="playlist-card-actions">
+          ${isOwn ? "" : `
+            <button
+              class="track-action"
               data-action="playlist-follow"
               data-id="${esc(playlist.id)}"
-              aria-label="Follow playlist">
+              aria-label="Follow playlist"
+              title="${playlist.followed ? "Unfollow" : "Follow"}"
+            >
               ${playlist.followed
-                ? svgIcon("check", 17)
-                : svgIcon("plus", 17)}
+                ? icon("check", 17)
+                : icon("plus", 17)}
             </button>
           `}
         </div>
@@ -323,244 +538,365 @@
 
   function trackRow(track, index, options = {}) {
     const liked = isTrackLiked(track.id);
+
     return `
-      <div class="track-row"
+      <div
+        class="track-row"
         ${options.draggable ? 'draggable="true"' : ""}
         data-track-id="${esc(track.id)}"
-        data-index="${index}">
+        data-index="${Number(index) || 0}"
+      >
+        ${image(track.thumbnail, "track-cover")}
 
-        ${options.draggable
-          ? `<span class="track-grip" title="Drag to reorder">${svgIcon("grip", 18)}</span>`
-          : ""}
+        <div class="track-copy">
+          <div class="track-title">
+            ${esc(track.title)}
+          </div>
 
-        ${img(track.thumbnail, "track-cover")}
-
-        <div class="grow">
-          <div class="track-title">${esc(track.title)}</div>
           <div class="track-sub">
             ${esc(track.artist || "Unknown artist")}
-            · ${shortTime(track.duration_sec)}
+            · ${formatTime(track.duration_sec)}
           </div>
         </div>
 
         <div class="track-actions">
-          <button class="track-action"
+
+          <button
+            class="track-action"
             data-action="like-track"
             data-id="${esc(track.id)}"
-            title="${liked ? "Unlike" : "Like"}"
             aria-label="${liked ? "Unlike song" : "Like song"}"
-            aria-pressed="${liked ? "true" : "false"}">
-            ${svgIcon(liked ? "heartFill" : "heart", 18)}
+            aria-pressed="${liked ? "true" : "false"}"
+          >
+            ${icon(liked ? "heartFill" : "heart", 17)}
           </button>
 
           ${options.add ? `
-            <button class="track-action"
+            <button
+              class="track-action"
               data-action="add-track"
               data-id="${esc(track.id)}"
+              aria-label="Add song to playlist"
               title="Add to playlist"
-              aria-label="Add to playlist">
-              ${svgIcon("plus", 18)}
+            >
+              ${icon("plus", 17)}
             </button>
           ` : ""}
 
           ${options.group ? `
-            <button class="track-action"
+            <button
+              class="track-action"
+              data-action="group-play-track"
+              data-id="${esc(track.id)}"
+              aria-label="Play now in group"
+              title="Play now in group"
+            >
+              ${icon("play", 16)}
+            </button>
+
+            <button
+              class="track-action"
               data-action="group-track"
               data-id="${esc(track.id)}"
+              aria-label="Add to group queue"
               title="Add to group queue"
-              aria-label="Add to group queue">
-              ${svgIcon("users", 18)}
+            >
+              ${icon("users", 17)}
             </button>
           ` : ""}
 
           ${options.reorder ? `
-            <div class="track-management">
-              <button data-action="move-track-up"
+            <span class="track-management">
+              <button
+                data-action="move-track-up"
                 data-id="${esc(track.id)}"
-                title="Move up">
-                ${svgIcon("up", 15)}
+                aria-label="Move up"
+              >
+                ${icon("up", 14)}
               </button>
 
-              <button data-action="move-track-down"
+              <button
+                data-action="move-track-down"
                 data-id="${esc(track.id)}"
-                title="Move down">
-                ${svgIcon("down", 15)}
+                aria-label="Move down"
+              >
+                ${icon("down", 14)}
               </button>
-            </div>
+            </span>
           ` : ""}
 
           ${options.remove ? `
-            <button class="track-action remove-track"
+            <button
+              class="track-action"
               data-action="remove-track"
               data-id="${esc(track.id)}"
-              title="Remove from playlist"
-              aria-label="Remove from playlist">
-              ${svgIcon("trash", 16)}
+              aria-label="Remove song"
+            >
+              ${icon("trash", 16)}
             </button>
           ` : ""}
 
-          <button class="play-circle"
+          <button
+            class="play-circle"
             data-action="play-track"
             data-id="${esc(track.id)}"
-            title="Play"
-            aria-label="Play song">
-            ${svgIcon("play", 17)}
+            aria-label="Play in personal player"
+            title="Personal player"
+          >
+            ${icon("play", 17)}
           </button>
+
         </div>
       </div>
     `;
   }
 
   async function loadProfile() {
-    const result = await api("/api/profile");
-    state.profile = result.profile;
+    const data = await api("/api/profile");
+
+    state.profile = data.profile;
+
     setAvatar();
-  }
 
-  function isTrackLiked(trackId) {
-    return state.liked.some(item => String(item.id) === String(trackId));
-  }
-
-  function updateTrackLikeButtons(trackId, liked) {
-    document.querySelectorAll('[data-action="like-track"]').forEach(button => {
-      if (String(button.dataset.id) !== String(trackId)) return;
-      button.innerHTML = svgIcon(liked ? "heartFill" : "heart", 18);
-      button.title = liked ? "Unlike" : "Like";
-      button.setAttribute("aria-label", liked ? "Unlike song" : "Like song");
-      button.setAttribute("aria-pressed", liked ? "true" : "false");
-    });
+    return state.profile;
   }
 
   async function loadLikedTracks() {
-    const data = await api("/api/library/liked-tracks?limit=50");
-    state.liked = Array.isArray(data.results) ? data.results : [];
+    const data = await api(
+      "/api/library/liked-tracks?limit=50"
+    );
+
+    state.liked = Array.isArray(data.results)
+      ? data.results
+      : [];
+
     state.likedLoaded = true;
-    if (state.currentTrack) updatePlayer();
+
+    return state.liked;
   }
 
   async function toggleTrackLike(track) {
-    if (!track || !track.id) throw new Error("Song details are unavailable.");
-    if (!state.likedLoaded) await loadLikedTracks();
-    const trackId = String(track.id);
-    if (isTrackLiked(trackId)) {
-      await api("/api/tracks/" + encodeURIComponent(trackId) + "/like", { method: "DELETE" });
-      state.liked = state.liked.filter(item => String(item.id) !== trackId);
-      updateTrackLikeButtons(trackId, false);
+    if (!track?.id) {
+      throw new Error("Song details are unavailable.");
+    }
+
+    if (!state.likedLoaded) {
+      await loadLikedTracks();
+    }
+
+    const id = String(track.id);
+
+    if (isTrackLiked(id)) {
+      await api(
+        `/api/tracks/${encodeURIComponent(id)}/like`,
+        { method: "DELETE" }
+      );
+
+      state.liked = state.liked.filter(
+        item => String(item.id) !== id
+      );
+
       showToast("Removed from Liked Songs");
+
     } else {
-      const payload = { id: track.id, title: track.title, artist: track.artist || "Unknown artist", duration_sec: Number(track.duration_sec || 0), thumbnail: track.thumbnail || null };
-      await api("/api/tracks/" + encodeURIComponent(trackId) + "/like", { method: "POST", body: JSON.stringify(payload) });
-      state.liked = [payload, ...state.liked.filter(item => String(item.id) !== trackId)];
-      updateTrackLikeButtons(trackId, true);
+      const payload = {
+        id: track.id,
+        title: track.title,
+        artist: track.artist || "Unknown artist",
+        duration_sec: Number(track.duration_sec || 0),
+        thumbnail: track.thumbnail || null
+      };
+
+      await api(
+        `/api/tracks/${encodeURIComponent(id)}/like`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload)
+        }
+      );
+
+      state.liked.unshift(payload);
+
       showToast("Added to Liked Songs");
     }
-    if (state.currentTrack && String(state.currentTrack.id) === trackId) updatePlayer();
-    if (state.page === "library" && state.libraryScope === "liked") await showLibraryScope("liked");
+
+    if (state.page === "library" && state.libraryScope === "liked") {
+      renderLibraryItems();
+    }
+
+    if (state.page === "home") {
+      refreshHomeTrackRows();
+    }
+
+    if (state.page === "search" && state.searchMode === "music") {
+      renderSearchResults();
+    }
+
+    updatePlayer();
   }
 
-  async function loadHome() {
+  function refreshHomeTrackRows() {
+    const target = $("homeTracks");
+    if (!target) return;
+
+    target.innerHTML = state.homeTracks.length
+      ? state.homeTracks.map((track, index) =>
+          trackRow(track, index, {
+            add: true,
+            group: Boolean(state.selectedGroup)
+          })
+        ).join("")
+      : '<div class="empty">No recommendations available.</div>';
+  }
+
+  function renderHomeShell() {
     const page = $("page-home");
+    if (!page) return;
 
     page.innerHTML = `
-      <section class="home-hero">
-        <div class="eyebrow">Your daily soundtrack</div>
+      <section class="hero-card">
+        <div class="hero-content">
+          <div class="eyebrow">Your listening space</div>
 
-        <h1 class="page-title">
-          A little music<br>for every mood.
-        </h1>
+          <h1>
+            Your music.<br>
+            Your moments.
+          </h1>
 
-        <p>
-          Find something you love, save it to a playlist,
-          or start a group queue.
-        </p>
+          <p>
+            Discover music, build playlists and share your
+            listening with your Telegram groups.
+          </p>
 
-        <div class="home-hero-actions">
-          <button class="primary" data-page="search">
-            ${svgIcon("search", 16)}
-            Find music
-          </button>
+          <div class="hero-actions">
+            <button class="primary-button" data-page="search">
+              ${icon("search", 16)}
+              Explore music
+            </button>
 
-          <button class="secondary" data-page="library">
-            ${svgIcon("library", 16)}
-            Your library
-          </button>
+            <button class="secondary-button" data-page="library">
+              ${icon("library", 16)}
+              Your library
+            </button>
+          </div>
         </div>
       </section>
 
-      <div class="section-head">
-        <h2>Picked for you</h2>
+      <section>
+        <div class="section-head">
+          <h2>Made for your listening</h2>
 
-        <button data-action="refresh-home">
-          ${svgIcon("refresh", 14)}
-          Refresh
-        </button>
-      </div>
+          <button data-action="refresh-home">
+            ${icon("refresh", 14)}
+            Refresh
+          </button>
+        </div>
 
-      <div class="pill-row" id="homeSuggestionModes">
-        <button class="suggestion-chip active"
-          data-home-query="popular Hindi songs">For you</button>
+        <p id="homeSongStatus" class="search-status">
+          Preparing your personal mix…
+        </p>
 
-        <button class="suggestion-chip"
-          data-home-query="trending Hindi songs">Hindi hits</button>
+        <div id="homeTracks" class="list">
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
+        </div>
+      </section>
 
-        <button class="suggestion-chip"
-          data-home-query="new Hindi songs 2026">New finds</button>
+      <section>
+        <div class="section-head">
+          <h2>Trending playlists</h2>
 
-        <button class="suggestion-chip"
-          data-home-query="popular English songs">English</button>
+          <button data-action="open-discover">
+            Explore all
+          </button>
+        </div>
 
-        <button class="suggestion-chip"
-          data-home-query="lofi chill songs">Chill</button>
+        <div id="homeDiscover" class="grid">
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
+        </div>
+      </section>
 
-        <button class="suggestion-chip"
-          data-home-query="romantic songs">Romantic</button>
+      <section>
+        <div class="section-head">
+          <h2>Fresh from creators</h2>
+        </div>
 
-        <button class="suggestion-chip"
-          data-home-query="trending songs 2026">Trending</button>
-      </div>
+        <div id="homeFresh" class="grid">
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
+        </div>
+      </section>
 
-      <div id="homeSongStatus" class="muted small home-song-status">
-        Finding songs for you…
-      </div>
+      <section>
+        <div class="section-head">
+          <h2>Your playlists</h2>
 
-      <div id="homeTracks" class="list home-track-list">
-        <div class="empty">Loading song suggestions…</div>
-      </div>
+          <button data-action="create-playlist">
+            ${icon("plus", 14)}
+            Create
+          </button>
+        </div>
 
-      <div class="section-head">
-        <h2>Discover playlists</h2>
-        <button data-page="library">Explore</button>
-      </div>
-
-      <div id="homeDiscover" class="grid">
-        <div class="empty">Loading playlists…</div>
-      </div>
-
-      <div class="section-head">
-        <h2>Your playlists</h2>
-        <button data-action="create-playlist">
-          ${svgIcon("plus", 14)}
-          Create
-        </button>
-      </div>
-
-      <div id="homeMine" class="grid"></div>
+        <div id="homeMine" class="grid">
+          <div class="empty">Loading your playlists…</div>
+        </div>
+      </section>
     `;
+  }
 
-    const [discoverResult, mineResult] = await Promise.allSettled([
-      api("/api/playlists?scope=discover&limit=12"),
+  async function loadHome(force = false) {
+    if (!state.homeRendered) {
+      renderHomeShell();
+      state.homeRendered = true;
+    }
+
+    if (
+      !force &&
+      state.homeFeedLoadedAt &&
+      Date.now() - state.homeFeedLoadedAt < 120000
+    ) {
+      if (
+        !state.homeLoadedAt ||
+        Date.now() - state.homeLoadedAt >= 180000
+      ) {
+        await loadHomeTracks(false);
+      }
+
+      return;
+    }
+
+    const results = await Promise.allSettled([
+      api("/api/playlists?scope=trending&limit=12"),
+      api("/api/playlists?scope=fresh&limit=12"),
       api("/api/playlists?scope=mine&limit=12")
     ]);
 
-    if (discoverResult.status === "fulfilled") {
-      state.discover = discoverResult.value.results || [];
+    const [trendingResult, freshResult, mineResult] = results;
+
+    if (trendingResult.status === "fulfilled") {
+      state.discover = trendingResult.value.results || [];
 
       $("homeDiscover").innerHTML = state.discover.length
         ? state.discover.map(playlistCard).join("")
-        : '<div class="empty" style="grid-column:1/-1">Public playlists will appear here.</div>';
+        : '<div class="empty">Public playlists will appear here.</div>';
+
     } else {
       $("homeDiscover").innerHTML =
-        `<div class="empty" style="grid-column:1/-1">${esc(discoverResult.reason.message)}</div>`;
+        `<div class="empty">${esc(trendingResult.reason.message)}</div>`;
+    }
+
+    if (freshResult.status === "fulfilled") {
+      const fresh = freshResult.value.results || [];
+
+      $("homeFresh").innerHTML = fresh.length
+        ? fresh.map(playlistCard).join("")
+        : '<div class="empty">No new public playlists yet.</div>';
+
+    } else {
+      $("homeFresh").innerHTML =
+        `<div class="empty">${esc(freshResult.reason.message)}</div>`;
     }
 
     if (mineResult.status === "fulfilled") {
@@ -568,116 +904,118 @@
 
       $("homeMine").innerHTML = state.playlists.length
         ? state.playlists.map(playlistCard).join("")
-        : '<div class="empty" style="grid-column:1/-1">Create your first playlist.</div>';
+        : '<div class="empty">Create your first playlist.</div>';
+
     } else {
       $("homeMine").innerHTML =
-        `<div class="empty" style="grid-column:1/-1">${esc(mineResult.reason.message)}</div>`;
+        `<div class="empty">${esc(mineResult.reason.message)}</div>`;
     }
 
-    await loadHomeTracks(state.homeQuery, false);
+    state.homeFeedLoadedAt = Date.now();
+
+    await loadHomeTracks(force);
   }
 
-  async function loadHomeTracks(query = state.homeQuery, force = false) {
-    const cleanQuery = String(query || "popular Hindi songs")
-      .trim()
-      .slice(0, 120);
-
+  async function loadHomeTracks(force = false) {
     const target = $("homeTracks");
     const status = $("homeSongStatus");
 
     if (!target || !status) return;
 
-    const sameQuery = cleanQuery === state.homeQuery;
-
     if (
       !force &&
-      sameQuery &&
       state.homeTracks.length &&
       Date.now() - state.homeLoadedAt < 180000
     ) {
-      target.innerHTML = state.homeTracks.map((track, index) => trackRow(track, index, { add: true, group: Boolean(state.selectedGroup) })).join("");
-      status.textContent = "Suggestions · " + state.homeTracks.length + " songs";
+      refreshHomeTrackRows();
       return;
     }
 
-    state.homeQuery = cleanQuery;
-
-    document.querySelectorAll("[data-home-query]").forEach(button => {
-      button.classList.toggle(
-        "active",
-        button.dataset.homeQuery === cleanQuery
-      );
-    });
-
     const requestId = ++state.homeRequest;
 
-    status.textContent = "Finding songs…";
-    target.innerHTML = '<div class="empty">Loading songs…</div>';
+    status.textContent = "Finding music based on your listening…";
+
+    target.innerHTML = `
+      <div class="skeleton"></div>
+      <div class="skeleton"></div>
+      <div class="skeleton"></div>
+    `;
 
     try {
-      const data = await api("/api/search", {
-        method: "POST",
-        body: JSON.stringify({ query: cleanQuery })
-      });
+      const data = await api("/api/recommendations");
 
       if (requestId !== state.homeRequest) return;
 
-      state.homeTracks = data.results || [];
+      state.homeTracks = Array.isArray(data.results)
+        ? data.results
+        : [];
+
       state.homeLoadedAt = Date.now();
 
-      target.innerHTML = state.homeTracks.length
-        ? state.homeTracks.map((track, index) => trackRow(track, index, {
-            add: true,
-            group: Boolean(state.selectedGroup)
-          })).join("")
-        : '<div class="empty">No songs found. Try another category.</div>';
+      refreshHomeTrackRows();
 
-      status.textContent = state.homeTracks.length
-        ? `Suggestions · ${state.homeTracks.length} songs`
-        : "Try another category.";
+      status.textContent = data.reason || (
+        data.personalized
+          ? "Picked from your recent listening."
+          : "Start listening to build your personal mix."
+      );
 
     } catch (error) {
       if (requestId !== state.homeRequest) return;
 
-      state.homeTracks = [];
-      target.innerHTML = `<div class="empty">${esc(error.message)}</div>`;
-      status.textContent = "Could not load song suggestions.";
+      target.innerHTML =
+        `<div class="empty">${esc(error.message)}</div>`;
+
+      status.textContent = "Recommendations could not be loaded.";
     }
   }
 
   function renderSearchShell() {
     $("page-search").innerHTML = `
-      <div class="eyebrow">Find something to play</div>
+      <div class="eyebrow">Find your next favourite</div>
       <h1 class="page-title">Search</h1>
 
-      <div class="searchbar">
-        ${svgIcon("search", 18)}
-        <input id="searchInput"
+      <div class="search-box">
+        ${icon("search", 19)}
+
+        <input
+          id="searchInput"
+          type="search"
           autocomplete="off"
           maxlength="120"
-          placeholder="Songs, people or playlists"
-          value="${esc(state.searchQuery)}">
+          placeholder="Songs, artists, people or playlists"
+          value="${esc(state.searchQuery)}"
+        >
       </div>
 
-      <div class="pill-row">
-        <button class="pill ${state.searchMode === "music" ? "active" : ""}"
-          data-search-mode="music">
-          ${svgIcon("music", 15)} Music
+      <div class="pill-row" style="margin-top:14px">
+        <button
+          class="pill ${state.searchMode === "music" ? "active" : ""}"
+          data-search-mode="music"
+        >
+          ${icon("music", 14)}
+          Music
         </button>
 
-        <button class="pill ${state.searchMode === "people" ? "active" : ""}"
-          data-search-mode="people">
-          ${svgIcon("users", 15)} People
+        <button
+          class="pill ${state.searchMode === "playlists" ? "active" : ""}"
+          data-search-mode="playlists"
+        >
+          ${icon("library", 14)}
+          Playlists
         </button>
 
-        <button class="pill ${state.searchMode === "playlists" ? "active" : ""}"
-          data-search-mode="playlists">
-          ${svgIcon("library", 15)} Playlists
+        <button
+          class="pill ${state.searchMode === "people" ? "active" : ""}"
+          data-search-mode="people"
+        >
+          ${icon("users", 14)}
+          People
         </button>
       </div>
 
-      <div id="searchStatus" class="muted small" style="margin:12px 0">
-        Search songs, find people or discover playlists.
+      <div id="searchStatus" class="search-status">
+        Search music, creators and public playlists.
       </div>
 
       <div id="searchResults" class="list"></div>
@@ -695,19 +1033,27 @@
     const query = input.value.trim();
     state.searchQuery = query;
 
-    const results = $("searchResults");
+    const target = $("searchResults");
     const status = $("searchStatus");
 
+    if (!target || !status) return;
+
     if (query.length < 2) {
+      state.searchResults = [];
+
       status.textContent = "Type at least two characters.";
-      results.replaceChildren();
+      target.innerHTML = "";
+
       return;
     }
 
     const requestId = ++state.searchRequest;
 
     status.textContent = "Searching…";
-    results.replaceChildren();
+    target.innerHTML = `
+      <div class="skeleton"></div>
+      <div class="skeleton"></div>
+    `;
 
     try {
       let data;
@@ -717,6 +1063,7 @@
           method: "POST",
           body: JSON.stringify({ query })
         });
+
       } else {
         data = await api(
           `/api/search/${state.searchMode}?q=${encodeURIComponent(query)}&limit=25`
@@ -727,75 +1074,98 @@
 
       state.searchResults = data.results || [];
 
-      if (state.searchMode === "music") {
-        results.className = "list";
-
-        results.innerHTML = state.searchResults.length
-          ? state.searchResults.map((track, index) => trackRow(track, index, {
-              add: true,
-              group: Boolean(state.selectedGroup)
-            })).join("")
-          : '<div class="empty">No songs found.</div>';
-
-      } else if (state.searchMode === "people") {
-        results.className = "list";
-
-        results.innerHTML = state.searchResults.length
-          ? state.searchResults.map(person => `
-              <div class="person-row">
-                ${img(person.avatar_url, "person-avatar")}
-
-                <div class="grow">
-                  <div class="track-title">${esc(person.display_name)}</div>
-
-                  <div class="track-sub">
-                    @${esc(person.handle)} ·
-                    ${person.visibility === "private"
-                      ? "Private profile"
-                      : `${Number(person.followers || 0)} followers`}
-                  </div>
-                </div>
-
-                <button class="secondary"
-                  data-action="follow-person"
-                  data-id="${esc(person.user_id)}"
-                  data-state="${esc(person.follow_state || "")}">
-                  ${person.follow_state === "accepted"
-                    ? "Following"
-                    : person.follow_state === "pending"
-                      ? "Requested"
-                      : "Follow"}
-                </button>
-
-                <button class="icon-btn"
-                  data-action="open-person"
-                  data-handle="${esc(person.handle)}"
-                  aria-label="Open profile">
-                  ${svgIcon("user", 18)}
-                </button>
-              </div>
-            `).join("")
-          : '<div class="empty">No people found.</div>';
-
-      } else {
-        results.className = "grid";
-
-        results.innerHTML = state.searchResults.length
-          ? state.searchResults.map(playlistCard).join("")
-          : '<div class="empty" style="grid-column:1/-1">No public playlists found.</div>';
-      }
+      renderSearchResults();
 
       status.textContent =
-        `${state.searchResults.length} result${state.searchResults.length === 1 ? "" : "s"}`;
-
+        `${state.searchResults.length} result${
+          state.searchResults.length === 1 ? "" : "s"
+        }`;
     } catch (error) {
       if (requestId !== state.searchRequest) return;
-      status.textContent = error.message;
+
+      state.searchResults = [];
+      target.innerHTML =
+        `<div class="empty">${esc(error.message)}</div>`;
+
+      status.textContent = "Search failed.";
     }
   }
 
+  function renderSearchResults() {
+    const target = $("searchResults");
+    if (!target) return;
+
+    if (!state.searchResults.length) {
+      target.className = "list";
+      target.innerHTML = '<div class="empty">No results found.</div>';
+      return;
+    }
+
+    if (state.searchMode === "music") {
+      target.className = "list";
+
+      target.innerHTML = state.searchResults.map(
+        (track, index) => trackRow(track, index, {
+          add: true,
+          group: Boolean(state.selectedGroup)
+        })
+      ).join("");
+
+      return;
+    }
+
+    if (state.searchMode === "playlists") {
+      target.className = "grid";
+      target.innerHTML = state.searchResults.map(playlistCard).join("");
+      return;
+    }
+
+    target.className = "list";
+
+    target.innerHTML = state.searchResults.map(person => `
+      <div class="person-row">
+        ${image(person.avatar_url, "person-avatar")}
+
+        <div class="grow">
+          <div class="track-title">
+            ${esc(person.display_name)}
+          </div>
+
+          <div class="track-sub">
+            @${esc(person.handle)}
+            · ${Number(person.followers || 0)} followers
+          </div>
+        </div>
+
+        <button
+          class="secondary-button"
+          data-action="follow-person"
+          data-id="${esc(person.user_id)}"
+          data-state="${esc(person.follow_state || "")}"
+        >
+          ${person.follow_state === "accepted"
+            ? "Following"
+            : person.follow_state === "pending"
+              ? "Requested"
+              : "Follow"}
+        </button>
+
+        <button
+          class="track-action"
+          data-action="open-person"
+          data-handle="${esc(person.handle)}"
+          aria-label="Open profile"
+        >
+          ${icon("user", 18)}
+        </button>
+      </div>
+    `).join("");
+  }
+
   function setSearchMode(mode) {
-    if (!["music", "people", "playlists"].includes(mode)) return;
+    if (!["music", "playlists", "people"].includes(mode)) {
+      return;
+    }
 
     state.searchMode = mode;
 
@@ -809,32 +1179,59 @@
     runSearch();
   }
 
-  async function loadLibrary() {
+  function renderLibrary() {
     $("page-library").innerHTML = `
       <div class="eyebrow">Your collection</div>
 
-      <div class="row" style="justify-content:space-between">
-        <h1 class="page-title">Your Library</h1>
+      <div class="section-head">
+        <h1 class="page-title">Your library</h1>
 
-        <button class="primary" data-action="create-playlist">
-          ${svgIcon("plus", 15)} Create
+        <button data-action="create-playlist">
+          ${icon("plus", 15)}
+          Create
         </button>
       </div>
 
       <div class="pill-row">
-        <button class="pill" data-library-scope="mine">Playlists</button>
-        <button class="pill" data-library-scope="following">Following</button>
-        <button class="pill" data-library-scope="collaborating">Collaborating</button>
-        <button class="pill" data-library-scope="liked">Liked songs</button>
+        <button class="pill" data-library-scope="mine">
+          Playlists
+        </button>
+
+        <button class="pill" data-library-scope="discover">
+          Discover
+        </button>
+
+        <button class="pill" data-library-scope="following">
+          Following
+        </button>
+
+        <button class="pill" data-library-scope="collaborating">
+          Collaborating
+        </button>
+
+        <button class="pill" data-library-scope="liked">
+          Liked songs
+        </button>
       </div>
 
-      <div id="libraryItems" class="grid" style="margin-top:14px"></div>
+      <div id="libraryStatus" class="search-status"></div>
+      <div id="libraryItems" class="grid"></div>
     `;
 
-    await showLibraryScope("mine");
+    showLibraryScope(state.libraryScope || "mine");
   }
 
   async function showLibraryScope(scope) {
+    const allowed = [
+      "mine",
+      "discover",
+      "following",
+      "collaborating",
+      "liked"
+    ];
+
+    if (!allowed.includes(scope)) return;
+
     state.libraryScope = scope;
 
     document.querySelectorAll("[data-library-scope]").forEach(button => {
@@ -844,68 +1241,1988 @@
       );
     });
 
+    await renderLibraryItems();
+  }
+
+  async function renderLibraryItems() {
     const target = $("libraryItems");
+    const status = $("libraryStatus");
+
     if (!target) return;
 
-    target.className = scope === "liked" ? "list" : "grid";
-    target.innerHTML = '<div class="empty">Loading…</div>';
+    target.className =
+      state.libraryScope === "liked" ? "list" : "grid";
+
+    target.innerHTML = '<div class="skeleton"></div>';
+
+    if (status) status.textContent = "Loading your library…";
 
     try {
-      if (scope === "liked") {
-        const data = await api("/api/library/liked-tracks?limit=50");
-        state.liked = Array.isArray(data.results) ? data.results : [];
-        state.likedLoaded = true;
+      if (state.libraryScope === "liked") {
+        await loadLikedTracks();
 
         target.innerHTML = state.liked.length
-          ? state.liked.map((track, index) => trackRow(track, index)).join("")
-          : '<div class="empty">Songs you like will live here.</div>';
+          ? state.liked.map((track, index) =>
+              trackRow(track, index, {
+                group: Boolean(state.selectedGroup)
+              })
+            ).join("")
+          : '<div class="empty">Songs you like will appear here.</div>';
 
       } else {
         const data = await api(
-          `/api/playlists?scope=${encodeURIComponent(scope)}&limit=50`
+          `/api/playlists?scope=${encodeURIComponent(state.libraryScope)}&limit=50`
         );
 
         const items = data.results || [];
 
-        if (scope === "mine") {
+        if (state.libraryScope === "mine") {
           state.playlists = items;
         }
 
         target.innerHTML = items.length
           ? items.map(playlistCard).join("")
-          : '<div class="empty" style="grid-column:1/-1">Nothing here yet.</div>';
+          : '<div class="empty">Nothing here yet.</div>';
+      }
+
+      if (status) status.textContent = "";
+
+    } catch (error) {
+      target.innerHTML =
+        `<div class="empty">${esc(error.message)}</div>`;
+
+      if (status) status.textContent = "Unable to load this section.";
+    }
+  }
+
+  async function renderProfile() {
+    const page = $("page-profile");
+
+    if (!state.profile) {
+      page.innerHTML = '<div class="empty">Loading profile…</div>';
+
+      try {
+        await loadProfile();
+      } catch (error) {
+        page.innerHTML =
+          `<div class="empty">${esc(error.message)}</div>`;
+        return;
+      }
+    }
+
+    const profile = state.profile;
+
+    const avatar = profile.avatar_url
+      ? image(profile.avatar_url, "profile-big-avatar")
+      : `<div class="profile-big-avatar profile-placeholder">${icon("user", 34)}</div>`;
+
+    page.innerHTML = `
+      <div class="eyebrow">Your account</div>
+
+      <div class="profile-head">
+        ${avatar}
+
+        <h1>${esc(profile.display_name)}</h1>
+
+        <p class="muted small">
+          @${esc(profile.handle)}
+        </p>
+
+        <p class="profile-bio">
+          ${esc(profile.bio || "No bio added yet.")}
+        </p>
+
+        <div class="stat-row">
+          <div class="stat">
+            <strong>${Number(profile.followers || 0)}</strong>
+            <span>Followers</span>
+          </div>
+
+          <div class="stat">
+            <strong>${Number(profile.following || 0)}</strong>
+            <span>Following</span>
+          </div>
+        </div>
+
+        <button class="primary-button" data-action="edit-profile">
+          Edit profile
+        </button>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section-head">
+        <h2>Your public playlists</h2>
+
+        <button data-action="open-discover">
+          Discover
+        </button>
+      </div>
+
+      <div id="profilePlaylists" class="grid">
+        <div class="empty">Loading playlists…</div>
+      </div>
+
+      <div class="section-head">
+        <h2>Account settings</h2>
+      </div>
+
+      <div class="track-row">
+        <div class="track-copy">
+          <div class="track-title">Profile visibility</div>
+          <div class="track-sub">
+            ${esc(profile.visibility)}
+          </div>
+        </div>
+
+        <button
+          class="secondary-button"
+          data-action="toggle-profile-privacy"
+        >
+          Change
+        </button>
+      </div>
+    `;
+
+    try {
+      const data = await api(
+        "/api/playlists?scope=mine&limit=50"
+      );
+
+      const target = $("profilePlaylists");
+      if (!target) return;
+
+      const publicItems = (data.results || []).filter(
+        item => item.visibility === "public"
+      );
+
+      target.innerHTML = publicItems.length
+        ? publicItems.map(playlistCard).join("")
+        : '<div class="empty">No public playlists yet.</div>';
+
+    } catch (_) {
+      const target = $("profilePlaylists");
+
+      if (target) {
+        target.innerHTML =
+          '<div class="empty">Could not load playlists.</div>';
+      }
+    }
+  }
+
+  async function openPerson(handle) {
+    const data = await api(
+      `/api/people/${encodeURIComponent(handle)}`
+    );
+
+    state.activePerson = data;
+
+    setPage("person");
+  }
+
+  function renderPerson() {
+    const data = state.activePerson;
+
+    if (!data?.profile) {
+      $("page-person").innerHTML =
+        '<div class="empty">Profile not found.</div>';
+      return;
+    }
+
+    const person = data.profile;
+
+    const avatar = person.avatar_url
+      ? image(person.avatar_url, "profile-big-avatar")
+      : `<div class="profile-big-avatar profile-placeholder">${icon("user", 35)}</div>`;
+
+    $("page-person").innerHTML = `
+      <button class="secondary-button" data-page="search">
+        ← Back to search
+      </button>
+
+      <div class="profile-head">
+        ${avatar}
+
+        <h1>${esc(person.display_name)}</h1>
+
+        <p class="muted small">@${esc(person.handle)}</p>
+
+        <p class="profile-bio">${esc(person.bio || "")}</p>
+
+        <div class="stat-row">
+          <div class="stat">
+            <strong>${Number(person.followers || 0)}</strong>
+            <span>Followers</span>
+          </div>
+
+          <div class="stat">
+            <strong>${Number(person.following || 0)}</strong>
+            <span>Following</span>
+          </div>
+        </div>
+
+        ${person.is_self ? "" : `
+          <button
+            class="primary-button"
+            data-action="follow-person"
+            data-id="${esc(person.user_id)}"
+            data-state="${esc(person.follow_state || "")}"
+          >
+            ${person.follow_state === "accepted"
+              ? "Following"
+              : person.follow_state === "pending"
+                ? "Requested"
+                : "Follow"}
+          </button>
+        `}
+      </div>
+
+      <div class="section-head">
+        <h2>Public playlists</h2>
+      </div>
+
+      <div class="grid">
+        ${(data.playlists || []).map(playlistCard).join("") ||
+          '<div class="empty">No public playlists.</div>'}
+      </div>
+    `;
+  }
+
+  async function loadNotifications() {
+    const page = $("page-notifications");
+
+    page.innerHTML = `
+      <div class="eyebrow">Your activity</div>
+      <h1 class="page-title">Notifications</h1>
+
+      <div id="notificationItems" class="list">
+        <div class="skeleton"></div>
+        <div class="skeleton"></div>
+      </div>
+    `;
+
+    try {
+      const data = await api("/api/notifications?limit=40");
+
+      state.notifications = data.results || [];
+
+      const unread = state.notifications.some(
+        item => !item.read
+      );
+
+      $("notificationDot").hidden = !unread;
+
+      $("notificationItems").innerHTML =
+        state.notifications.length
+          ? state.notifications.map(renderNotification).join("")
+          : '<div class="empty">You are all caught up.</div>';
+
+    } catch (error) {
+      $("notificationItems").innerHTML =
+        `<div class="empty">${esc(error.message)}</div>`;
+    }
+  }
+
+  function renderNotification(notification) {
+    const payload = notification.payload || {};
+    const actor = esc(
+      notification.actor?.display_name || "Someone"
+    );
+
+    let message = "You have an update.";
+    let actions = "";
+    let iconName = "bell";
+
+    if (notification.type === "collaboration_invitation") {
+      iconName = "users";
+
+      message =
+        `${actor} invited you to collaborate on ` +
+        `<b>${esc(payload.playlist_name)}</b>.`;
+
+      actions = `
+        <button
+          class="primary-button"
+          data-action="invitation"
+          data-id="${esc(payload.invitation_id)}"
+          data-choice="accept"
+        >
+          Accept
+        </button>
+
+        <button
+          class="secondary-button"
+          data-action="invitation"
+          data-id="${esc(payload.invitation_id)}"
+          data-choice="reject"
+        >
+          Decline
+        </button>
+      `;
+
+    } else if (notification.type === "follow_request") {
+      iconName = "heart";
+
+      message = `${actor} wants to follow you.`;
+
+      actions = `
+        <button
+          class="primary-button"
+          data-action="follow-response"
+          data-id="${esc(payload.follower_id)}"
+          data-choice="accept"
+        >
+          Accept
+        </button>
+
+        <button
+          class="secondary-button"
+          data-action="follow-response"
+          data-id="${esc(payload.follower_id)}"
+          data-choice="reject"
+        >
+          Decline
+        </button>
+      `;
+
+    } else if (notification.type === "new_follower") {
+      iconName = "heart";
+      message = `${actor} started following you.`;
+
+    } else if (notification.type === "playlist_followed") {
+      iconName = "music";
+      message =
+        `${actor} followed your playlist ` +
+        `<b>${esc(payload.playlist_name)}</b>.`;
+
+    } else if (notification.type === "follow_accepted") {
+      iconName = "heart";
+      message = `${actor} accepted your follow request.`;
+
+    } else if (
+      notification.type === "collaboration_role_changed"
+    ) {
+      iconName = "users";
+      message =
+        `Your role on <b>${esc(payload.playlist_name)}</b> ` +
+        `is now ${esc(payload.role)}.`;
+
+    } else if (
+      notification.type === "collaboration_removed"
+    ) {
+      iconName = "users";
+      message =
+        `You were removed from <b>${esc(payload.playlist_name)}</b>.`;
+
+    } else if (
+      notification.type === "collaboration_accepted"
+    ) {
+      iconName = "check";
+      message =
+        `${actor} accepted your collaboration invitation.`;
+
+    } else if (
+      notification.type === "collaboration_rejected"
+    ) {
+      iconName = "close";
+      message =
+        `${actor} declined your collaboration invitation.`;
+    }
+
+    return `
+      <article class="notification ${notification.read ? "" : "unread"}">
+        <div class="notification-icon">
+          ${icon(iconName, 18)}
+        </div>
+
+        <div class="grow">
+          <p>${message}</p>
+
+          <div class="track-sub">
+            ${esc(notification.created_at || "")}
+          </div>
+
+          ${actions
+            ? `<div class="notification-actions">${actions}</div>`
+            : ""}
+        </div>
+
+        <button
+          class="track-action"
+          data-action="read-notification"
+          data-id="${esc(notification.id)}"
+          aria-label="Mark notification read"
+        >
+          ${notification.read ? "" : icon("check", 16)}
+        </button>
+      </article>
+    `;
+  }
+
+  async function openPlaylist(id) {
+    try {
+      const data = await api(
+        `/api/playlists/${encodeURIComponent(id)}`
+      );
+
+      state.activePlaylist = data.playlist;
+
+      setPage("playlist");
+
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+
+  function renderPlaylist() {
+    const playlist = state.activePlaylist;
+
+    if (!playlist) {
+      $("page-playlist").innerHTML =
+        '<div class="empty">Playlist not found.</div>';
+      return;
+    }
+
+    const tracks = playlist.tracks || [];
+
+    const canEdit = ["owner", "editor"].includes(
+      playlist.role
+    );
+
+    const canAdd = [
+      "owner",
+      "editor",
+      "contributor"
+    ].includes(playlist.role);
+
+    const isOwner = playlist.role === "owner";
+
+    $("page-playlist").innerHTML = `
+      <button class="secondary-button" data-page="library">
+        ← Back to library
+      </button>
+
+      <div class="detail-head">
+        ${image(playlist.cover_url, "detail-cover")}
+
+        <div class="grow">
+          <div class="eyebrow">
+            ${esc(playlist.visibility)} playlist
+          </div>
+
+          <div class="detail-name">
+            ${esc(playlist.name)}
+          </div>
+
+          <div class="track-sub">
+            ${tracks.length} songs
+            · by @${esc(playlist.owner?.handle || "listener")}
+          </div>
+
+          <div class="track-sub">
+            ${Number(playlist.like_count || 0)} likes
+            · ${Number(playlist.follower_count || 0)} followers
+          </div>
+        </div>
+      </div>
+
+      <p class="muted small">
+        ${esc(playlist.description || "")}
+      </p>
+
+      <div class="detail-actions">
+        <button
+          class="primary-button"
+          data-action="play-playlist"
+          ${tracks.length ? "" : "disabled"}
+        >
+          ${icon("play", 15)}
+          Play personally
+        </button>
+
+        <button
+          class="secondary-button"
+          data-action="like-playlist"
+          data-id="${esc(playlist.id)}"
+        >
+          ${playlist.liked
+            ? icon("heartFill", 15)
+            : icon("heart", 15)}
+          ${playlist.liked ? "Liked" : "Like"}
+        </button>
+
+        ${!isOwner ? `
+          <button
+            class="secondary-button"
+            data-action="playlist-follow"
+            data-id="${esc(playlist.id)}"
+          >
+            ${playlist.followed ? "Following" : "Follow"}
+          </button>
+        ` : ""}
+
+        ${canAdd ? `
+          <button
+            class="secondary-button"
+            data-action="add-from-search"
+          >
+            ${icon("plus", 15)}
+            Add songs
+          </button>
+        ` : ""}
+
+        ${state.selectedGroup ? `
+          <button
+            class="secondary-button"
+            data-action="group-play-playlist"
+          >
+            ${icon("users", 15)}
+            Play in group
+          </button>
+
+          <button
+            class="secondary-button"
+            data-action="group-queue-playlist"
+          >
+            ${icon("plus", 15)}
+            Queue in group
+          </button>
+        ` : ""}
+
+        ${canEdit ? `
+          <button
+            class="secondary-button"
+            data-action="edit-playlist"
+          >
+            Edit
+          </button>
+        ` : ""}
+
+        ${isOwner ? `
+          <button
+            class="secondary-button"
+            data-action="invite-collaborator"
+          >
+            ${icon("users", 15)}
+            Invite
+          </button>
+
+          <button
+            class="danger-button"
+            data-action="delete-playlist"
+          >
+            ${icon("trash", 15)}
+            Delete
+          </button>
+        ` : ""}
+      </div>
+
+      <div class="section-head">
+        <h2>Tracks</h2>
+        <span class="muted small">${tracks.length} songs</span>
+      </div>
+
+      <div id="playlistTracks" class="list">
+        ${tracks.length
+          ? tracks.map((track, index) =>
+              trackRow(track, index, {
+                draggable: canEdit,
+                reorder: canEdit,
+                remove: canEdit,
+                group: Boolean(state.selectedGroup)
+              })
+            ).join("")
+          : '<div class="empty">This playlist is empty. Add songs to get started.</div>'}
+      </div>
+
+      ${isOwner ? `
+        <div class="section-head">
+          <h2>Collaborators</h2>
+        </div>
+
+        <div class="list">
+          ${(playlist.collaborators || []).map(person => `
+            <div class="person-row">
+              <div class="grow">
+                <div class="track-title">
+                  ${esc(person.display_name || person.handle || "Listener")}
+                </div>
+
+                <div class="track-sub">
+                  @${esc(person.handle || "unknown")}
+                  · ${esc(person.role)}
+                </div>
+              </div>
+
+              <button
+                class="track-action"
+                data-action="change-collaborator"
+                data-id="${esc(person.user_id)}"
+                aria-label="Change collaborator role"
+              >
+                ${icon("users", 16)}
+              </button>
+
+              <button
+                class="track-action"
+                data-action="remove-collaborator"
+                data-id="${esc(person.user_id)}"
+                aria-label="Remove collaborator"
+              >
+                ${icon("close", 16)}
+              </button>
+            </div>
+          `).join("") || '<div class="empty">No collaborators yet.</div>'}
+        </div>
+      ` : ""}
+    `;
+  }
+
+  async function reloadActivePlaylist() {
+    if (!state.activePlaylist) return;
+
+    const data = await api(
+      `/api/playlists/${encodeURIComponent(state.activePlaylist.id)}`
+    );
+
+    state.activePlaylist = data.playlist;
+
+    renderPlaylist();
+  }
+
+  function openSheet(title, body, actions) {
+    $("sheetTitle").textContent = title;
+    $("sheetBody").innerHTML = body;
+    $("sheetActions").innerHTML = actions;
+
+    $("sheetOverlay").classList.add("open");
+  }
+
+  function closeSheet() {
+    $("sheetOverlay").classList.remove("open");
+
+    state.selectedInvite = null;
+    state.modalTrack = null;
+
+    for (const url of previewObjectUrls.values()) {
+      URL.revokeObjectURL(url);
+    }
+
+    previewObjectUrls.clear();
+  }
+
+  function uploadFieldMarkup(prefix, label, currentValue = "") {
+    const fileId = `${prefix}File`;
+    const previewId = `${prefix}Preview`;
+    const previewWrapId = `${prefix}PreviewWrap`;
+    const progressId = `${prefix}Progress`;
+    const progressWrapId = `${prefix}ProgressWrap`;
+    const statusId = `${prefix}Status`;
+
+    return `
+      <div class="field">
+        <label>${esc(label)}</label>
+
+        <div class="upload-row">
+          <input
+            id="${esc(fileId)}"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+          >
+
+          <button
+            class="secondary-button"
+            data-action="upload-cover"
+            data-file="${esc(fileId)}"
+            data-target="${esc(prefix)}"
+          >
+            ${icon("upload", 15)}
+            Upload
+          </button>
+        </div>
+
+        <div class="upload-help">
+          JPG, PNG or WebP · Maximum 5 MB · Uploaded through Catbox.
+        </div>
+
+        <div id="${esc(previewWrapId)}" hidden>
+          <img
+            id="${esc(previewId)}"
+            class="upload-preview"
+            alt="Image preview"
+          >
+        </div>
+
+        <div id="${esc(progressWrapId)}" hidden>
+          <progress
+            id="${esc(progressId)}"
+            max="100"
+            value="0"
+          ></progress>
+
+          <div
+            id="${esc(statusId)}"
+            class="upload-status"
+            role="status"
+          ></div>
+        </div>
+
+        <input
+          id="${esc(prefix)}"
+          type="url"
+          maxlength="2048"
+          value="${esc(currentValue)}"
+          placeholder="Or paste an HTTPS image URL"
+        >
+      </div>
+    `;
+  }
+
+  function createPlaylistSheet() {
+    openSheet(
+      "Create playlist",
+      `
+        <div class="field">
+          <label>PLAYLIST NAME</label>
+
+          <input
+            id="newPlaylistName"
+            maxlength="80"
+            placeholder="Give your playlist a name"
+          >
+        </div>
+
+        <div class="field">
+          <label>DESCRIPTION</label>
+
+          <textarea
+            id="newPlaylistDescription"
+            maxlength="500"
+            placeholder="What is this playlist about?"
+          ></textarea>
+        </div>
+
+        <div class="field">
+          <label>PLAYLIST ICON</label>
+
+          <select id="newPlaylistIcon">
+            <option value="music">Music</option>
+            <option value="heart">Heart</option>
+            <option value="chill">Chill</option>
+            <option value="star">Star</option>
+            <option value="headphones">Headphones</option>
+            <option value="group">Group</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>VISIBILITY</label>
+
+          <select id="newPlaylistVisibility">
+            <option value="private">Private</option>
+            <option value="public">Public · show in discovery</option>
+            <option value="unlisted">Unlisted · link only</option>
+          </select>
+        </div>
+
+        ${uploadFieldMarkup(
+          "newPlaylistCover",
+          "PLAYLIST COVER"
+        )}
+      `,
+      `
+        <button
+          class="secondary-button"
+          data-action="close-sheet"
+        >
+          Cancel
+        </button>
+
+        <button
+          class="primary-button"
+          data-action="save-playlist"
+        >
+          Create playlist
+        </button>
+      `
+    );
+  }
+
+  function editPlaylistSheet() {
+    const playlist = state.activePlaylist;
+
+    if (!playlist) return;
+
+    openSheet(
+      "Edit playlist",
+      `
+        <div class="field">
+          <label>NAME</label>
+
+          <input
+            id="editPlaylistName"
+            maxlength="80"
+            value="${esc(playlist.name)}"
+          >
+        </div>
+
+        <div class="field">
+          <label>DESCRIPTION</label>
+
+          <textarea
+            id="editPlaylistDescription"
+            maxlength="500"
+          >${esc(playlist.description || "")}</textarea>
+        </div>
+
+        <div class="field">
+          <label>PLAYLIST ICON</label>
+
+          <select id="editPlaylistIcon">
+            ${[
+              ["music", "Music"],
+              ["heart", "Heart"],
+              ["chill", "Chill"],
+              ["star", "Star"],
+              ["headphones", "Headphones"],
+              ["group", "Group"]
+            ].map(([value, label]) => `
+              <option
+                value="${value}"
+                ${playlist.icon === value ? "selected" : ""}
+              >
+                ${label}
+              </option>
+            `).join("")}
+          </select>
+        </div>
+
+        ${uploadFieldMarkup(
+          "editPlaylistCover",
+          "PLAYLIST COVER",
+          playlist.cover_url || ""
+        )}
+
+        ${playlist.role === "owner" ? `
+          <div class="field">
+            <label>VISIBILITY</label>
+
+            <select id="editPlaylistVisibility">
+              <option
+                value="private"
+                ${playlist.visibility === "private" ? "selected" : ""}
+              >
+                Private
+              </option>
+
+              <option
+                value="public"
+                ${playlist.visibility === "public" ? "selected" : ""}
+              >
+                Public
+              </option>
+
+              <option
+                value="unlisted"
+                ${playlist.visibility === "unlisted" ? "selected" : ""}
+              >
+                Unlisted
+              </option>
+            </select>
+          </div>
+        ` : ""}
+      `,
+      `
+        <button
+          class="secondary-button"
+          data-action="close-sheet"
+        >
+          Cancel
+        </button>
+
+        <button
+          class="primary-button"
+          data-action="save-playlist-edit"
+        >
+          Save changes
+        </button>
+      `
+    );
+  }
+
+  function addTrackSheet(track) {
+    state.modalTrack = track;
+
+    const options = state.playlists.map(playlist => `
+      <option value="${esc(playlist.id)}">
+        ${esc(playlist.name)}
+      </option>
+    `).join("");
+
+    openSheet(
+      "Add to playlist",
+      `
+        <div class="track-row">
+          ${image(track.thumbnail, "track-cover")}
+
+          <div class="track-copy">
+            <div class="track-title">${esc(track.title)}</div>
+            <div class="track-sub">${esc(track.artist || "Unknown artist")}</div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>CHOOSE PLAYLIST</label>
+
+          <select id="targetPlaylist">
+            ${options || '<option value="">No playlists available</option>'}
+          </select>
+        </div>
+
+        ${options ? "" : `
+          <button
+            class="secondary-button"
+            data-action="create-playlist"
+          >
+            Create your first playlist
+          </button>
+        `}
+      `,
+      `
+        <button
+          class="secondary-button"
+          data-action="close-sheet"
+        >
+          Cancel
+        </button>
+
+        <button
+          class="primary-button"
+          data-action="confirm-add-track"
+          ${options ? "" : "disabled"}
+        >
+          Add song
+        </button>
+      `
+    );
+  }
+
+  function editProfileSheet() {
+    const profile = state.profile;
+
+    if (!profile) return;
+
+    openSheet(
+      "Edit profile",
+      `
+        <div class="field">
+          <label>USERNAME</label>
+
+          <input
+            id="profileHandle"
+            maxlength="24"
+            value="${esc(profile.handle)}"
+          >
+        </div>
+
+        <div class="field">
+          <label>DISPLAY NAME</label>
+
+          <input
+            id="profileName"
+            maxlength="48"
+            value="${esc(profile.display_name)}"
+          >
+        </div>
+
+        <div class="field">
+          <label>BIO</label>
+
+          <textarea
+            id="profileBio"
+            maxlength="160"
+          >${esc(profile.bio || "")}</textarea>
+        </div>
+
+        ${uploadFieldMarkup(
+          "profileAvatar",
+          "PROFILE IMAGE",
+          profile.avatar_url || ""
+        )}
+
+        <div class="field">
+          <label>PROFILE VISIBILITY</label>
+
+          <select id="profileVisibility">
+            <option
+              value="public"
+              ${profile.visibility === "public" ? "selected" : ""}
+            >
+              Public
+            </option>
+
+            <option
+              value="private"
+              ${profile.visibility === "private" ? "selected" : ""}
+            >
+              Private
+            </option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>SEARCH DISCOVERY</label>
+
+          <select id="profileDiscoverable">
+            <option
+              value="true"
+              ${profile.discoverable !== false ? "selected" : ""}
+            >
+              Allow people to find me
+            </option>
+
+            <option
+              value="false"
+              ${profile.discoverable === false ? "selected" : ""}
+            >
+              Hide me from people search
+            </option>
+          </select>
+        </div>
+      `,
+      `
+        <button
+          class="secondary-button"
+          data-action="close-sheet"
+        >
+          Cancel
+        </button>
+
+        <button
+          class="primary-button"
+          data-action="save-profile"
+        >
+          Save changes
+        </button>
+      `
+    );
+  }
+
+  function setUploadPreview(config, source, isObjectUrl) {
+    const preview = $(config.preview);
+    const wrapper = $(config.previewWrap);
+
+    if (!preview || !wrapper) return;
+
+    const oldUrl = previewObjectUrls.get(config.preview);
+
+    if (oldUrl) {
+      URL.revokeObjectURL(oldUrl);
+      previewObjectUrls.delete(config.preview);
+    }
+
+    preview.src = source || "";
+    wrapper.hidden = !source;
+
+    if (source && isObjectUrl) {
+      previewObjectUrls.set(config.preview, source);
+    }
+  }
+
+  function updateUploadStatus(config, text) {
+    const status = $(config.status);
+
+    if (status) {
+      status.textContent = text || "";
+    }
+  }
+
+  async function uploadCover(fileInputId, button) {
+    const input = $(fileInputId);
+    const config = UPLOAD_FIELDS[fileInputId];
+
+    if (!input || !config) {
+      throw new Error("Image input is unavailable.");
+    }
+
+    const target = $(fileInputId.replace(/File$/, ""));
+
+    const file = input.files?.[0];
+
+    if (!file || !target) {
+      throw new Error("Choose an image first.");
+    }
+
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      throw new Error("Use a JPG, PNG or WebP image.");
+    }
+
+    if (file.size <= 0) {
+      throw new Error("Selected image is empty.");
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error("Image must be 5 MB or smaller.");
+    }
+
+    const form = new FormData();
+
+    form.append(
+      "fileToUpload",
+      file,
+      file.name || "taalune-cover"
+    );
+
+    const progress = $(config.progress);
+    const progressWrap = $(config.progressWrap);
+    const originalText = button?.innerHTML || "";
+
+    if (progressWrap) progressWrap.hidden = false;
+    if (progress) progress.value = 0;
+
+    updateUploadStatus(config, "Preparing upload…");
+
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Uploading…";
+    }
+
+    try {
+      const result = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+
+        xhr.open(
+          "POST",
+          "/api/upload/cover",
+          true
+        );
+
+        xhr.setRequestHeader(
+          "X-Telegram-Init-Data",
+          initData
+        );
+
+        xhr.timeout = 50000;
+
+        xhr.upload.addEventListener("progress", event => {
+          if (!event.lengthComputable) {
+            updateUploadStatus(
+              config,
+              "Uploading image…"
+            );
+            return;
+          }
+
+          const percent = Math.min(
+            100,
+            Math.round(event.loaded / event.total * 100)
+          );
+
+          if (progress) {
+            progress.value = percent;
+          }
+
+          updateUploadStatus(
+            config,
+            `Uploading… ${percent}%`
+          );
+        });
+
+        xhr.addEventListener("load", () => {
+          let data;
+
+          try {
+            data = JSON.parse(xhr.responseText || "{}");
+          } catch (_) {
+            reject(
+              new Error("Upload server returned invalid JSON.")
+            );
+            return;
+          }
+
+          if (
+            xhr.status < 200 ||
+            xhr.status >= 300 ||
+            data.ok !== true
+          ) {
+            const code = data.error || "";
+
+            reject(
+              new Error(
+                API_MESSAGES[code] ||
+                data.message ||
+                code ||
+                `Upload failed (${xhr.status}).`
+              )
+            );
+
+            return;
+          }
+
+          if (
+            typeof data.url !== "string" ||
+            data.url.length > 2048
+          ) {
+            reject(
+              new Error("Catbox did not return a valid image URL.")
+            );
+            return;
+          }
+
+          let parsed;
+
+          try {
+            parsed = new URL(data.url);
+          } catch (_) {
+            reject(
+              new Error("Catbox returned an invalid URL.")
+            );
+            return;
+          }
+
+          if (
+            parsed.protocol !== "https:" ||
+            parsed.hostname !== "files.catbox.moe" ||
+            parsed.username ||
+            parsed.password ||
+            parsed.search ||
+            parsed.hash ||
+            !parsed.pathname.startsWith("/")
+          ) {
+            reject(
+              new Error("Catbox returned an invalid image URL.")
+            );
+            return;
+          }
+
+          resolve(data);
+        });
+
+        xhr.addEventListener("error", () => {
+          reject(
+            new Error("Network error while uploading to Catbox.")
+          );
+        });
+
+        xhr.addEventListener("abort", () => {
+          reject(new Error("Image upload was cancelled."));
+        });
+
+        xhr.addEventListener("timeout", () => {
+          reject(
+            new Error("Image upload timed out. Try again.")
+          );
+        });
+
+        // Do not set multipart Content-Type manually.
+        // Browser must generate the multipart boundary.
+        xhr.send(form);
+      });
+
+      target.value = result.url;
+
+      setUploadPreview(
+        config,
+        result.url,
+        false
+      );
+
+      if (progress) progress.value = 100;
+
+      updateUploadStatus(
+        config,
+        "Upload complete."
+      );
+
+      input.value = "";
+
+      showToast("Image uploaded successfully");
+
+      return result.url;
+
+    } catch (error) {
+      updateUploadStatus(
+        config,
+        error.message || "Upload failed."
+      );
+
+      throw error;
+
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.innerHTML = originalText;
+      }
+    }
+  }
+
+  async function inviteSheet() {
+    if (!state.activePlaylist) return;
+
+    openSheet(
+      "Invite collaborator",
+      `
+        <div class="field">
+          <label>SEARCH PEOPLE</label>
+
+          <input
+            id="inviteSearch"
+            maxlength="64"
+            placeholder="Name or username"
+          >
+        </div>
+
+        <div id="invitePeople" class="list">
+          <div class="empty">
+            Type at least two characters.
+          </div>
+        </div>
+
+        <div class="field">
+          <label>COLLABORATOR ROLE</label>
+
+          <select id="inviteRole">
+            <option value="editor">
+              Editor · add, remove and reorder
+            </option>
+
+            <option value="contributor">
+              Contributor · add songs
+            </option>
+
+            <option value="viewer">
+              Viewer · view and play
+            </option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>PLAYLIST</label>
+
+          <input
+            id="invitePlaylist"
+            value="${esc(state.activePlaylist.name)}"
+            disabled
+          >
+        </div>
+      `,
+      `
+        <button
+          class="secondary-button"
+          data-action="close-sheet"
+        >
+          Cancel
+        </button>
+
+        <button
+          class="primary-button"
+          data-action="send-invite"
+          id="sendInviteButton"
+          disabled
+        >
+          Send invite
+        </button>
+      `
+    );
+  }
+
+  async function searchInvitePeople() {
+    const input = $("inviteSearch");
+    const target = $("invitePeople");
+    const send = $("sendInviteButton");
+
+    if (!input || !target) return;
+
+    const query = input.value.trim();
+
+    if (query.length < 2) {
+      target.innerHTML =
+        '<div class="empty">Type at least two characters.</div>';
+
+      state.selectedInvite = null;
+
+      if (send) send.disabled = true;
+
+      return;
+    }
+
+    try {
+      const data = await api(
+        `/api/search/people?q=${encodeURIComponent(query)}&limit=15`
+      );
+
+      state.modalPeople = data.results || [];
+
+      target.innerHTML = state.modalPeople.length
+        ? state.modalPeople.map(person => `
+            <button
+              class="person-row"
+              data-action="select-invitee"
+              data-id="${esc(person.user_id)}"
+              style="width:100%;text-align:left"
+            >
+              ${image(person.avatar_url, "person-avatar")}
+
+              <span class="grow">
+                <span class="track-title">
+                  ${esc(person.display_name)}
+                </span>
+
+                <span class="track-sub">
+                  @${esc(person.handle)}
+                </span>
+              </span>
+
+              ${Number(state.selectedInvite) === Number(person.user_id)
+                ? icon("check", 17)
+                : icon("plus", 17)}
+            </button>
+          `).join("")
+        : '<div class="empty">No people found.</div>';
+
+      if (send) {
+        send.disabled = !state.selectedInvite;
       }
 
     } catch (error) {
       target.innerHTML =
-        `<div class="empty" style="grid-column:1/-1">${esc(error.message)}</div>`;
+        `<div class="empty">${esc(error.message)}</div>`;
+    }
+  }
+
+  async function reorderPlaylist(trackId, direction) {
+    const playlist = state.activePlaylist;
+
+    if (!playlist) {
+      throw new Error("Playlist is not open.");
+    }
+
+    const tracks = playlist.tracks.slice();
+
+    const from = tracks.findIndex(
+      track => String(track.id) === String(trackId)
+    );
+
+    const to = from + direction;
+
+    if (
+      from < 0 ||
+      to < 0 ||
+      to >= tracks.length
+    ) {
+      return;
+    }
+
+    [tracks[from], tracks[to]] = [
+      tracks[to],
+      tracks[from]
+    ];
+
+    const result = await api(
+      `/api/playlists/${encodeURIComponent(playlist.id)}/tracks/order`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          track_ids: tracks.map(track => track.id),
+          version: playlist.version
+        })
+      }
+    );
+
+    state.activePlaylist = result.playlist;
+
+    renderPlaylist();
+
+    showToast("Playlist order updated");
+  }
+
+  async function savePlaylist() {
+    const name = $("newPlaylistName").value.trim();
+
+    if (!name) {
+      throw new Error("Enter a playlist name.");
+    }
+
+    const body = {
+      name,
+      description: $("newPlaylistDescription").value,
+      visibility: $("newPlaylistVisibility").value,
+      cover_url: $("newPlaylistCover").value || null,
+      icon: $("newPlaylistIcon").value || "music"
+    };
+
+    const result = await api(
+      "/api/playlists",
+      {
+        method: "POST",
+        body: JSON.stringify(body)
+      }
+    );
+
+    closeSheet();
+
+    state.playlists.unshift(result.playlist);
+
+    showToast("Playlist created");
+
+    await openPlaylist(result.playlist.id);
+
+    if (state.page === "home") {
+      state.homeFeedLoadedAt = 0;
+    }
+  }
+
+  async function savePlaylistEdit() {
+    const playlist = state.activePlaylist;
+
+    if (!playlist) {
+      throw new Error("Playlist is not open.");
+    }
+
+    const body = {
+      name: $("editPlaylistName").value,
+      description: $("editPlaylistDescription").value,
+      cover_url: $("editPlaylistCover").value || null,
+      icon: $("editPlaylistIcon").value || "music"
+    };
+
+    const visibility = $("editPlaylistVisibility");
+
+    if (visibility) {
+      body.visibility = visibility.value;
+    }
+
+    const result = await api(
+      `/api/playlists/${encodeURIComponent(playlist.id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body)
+      }
+    );
+
+    state.activePlaylist = result.playlist;
+
+    closeSheet();
+
+    renderPlaylist();
+
+    showToast("Playlist updated");
+
+    state.homeFeedLoadedAt = 0;
+  }
+
+  async function saveProfile() {
+    const body = {
+      handle: $("profileHandle").value,
+      display_name: $("profileName").value,
+      bio: $("profileBio").value,
+      avatar_url: $("profileAvatar").value || null,
+      visibility: $("profileVisibility").value,
+      discoverable: $("profileDiscoverable").value === "true"
+    };
+
+    const data = await api(
+      "/api/profile",
+      {
+        method: "PATCH",
+        body: JSON.stringify(body)
+      }
+    );
+
+    state.profile = data.profile;
+
+    setAvatar();
+
+    closeSheet();
+
+    renderProfile();
+
+    showToast("Profile updated");
+  }
+
+  async function addTrackToPlaylist(track, playlistId) {
+    await api(
+      `/api/playlists/${encodeURIComponent(playlistId)}/tracks`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          id: track.id,
+          title: track.title,
+          artist: track.artist || "Unknown artist",
+          duration_sec: Number(track.duration_sec || 0),
+          thumbnail: track.thumbnail || null
+        })
+      }
+    );
+
+    showToast("Song added to playlist");
+
+    if (state.activePlaylist?.id === playlistId) {
+      await reloadActivePlaylist();
+    }
+
+    if (state.page === "home") {
+      state.homeFeedLoadedAt = 0;
+    }
+  }
+
+  async function confirmAddTrack() {
+    const playlistId = $("targetPlaylist")?.value;
+
+    if (!playlistId || !state.modalTrack) {
+      throw new Error("Choose a playlist first.");
+    }
+
+    await addTrackToPlaylist(
+      state.modalTrack,
+      playlistId
+    );
+
+    closeSheet();
+
+    await loadPersonalPlaylists();
+  }
+
+  async function loadPersonalPlaylists() {
+    const data = await api(
+      "/api/playlists?scope=mine&limit=50"
+    );
+
+    state.playlists = data.results || [];
+  }
+
+  async function togglePlaylistFollow(id) {
+    const data = await api(
+      `/api/playlists/${encodeURIComponent(id)}`
+    );
+
+    const playlist = data.playlist;
+
+    await api(
+      `/api/playlists/${encodeURIComponent(id)}/follow`,
+      {
+        method: playlist.followed ? "DELETE" : "POST"
+      }
+    );
+
+    showToast(
+      playlist.followed
+        ? "Playlist unfollowed"
+        : "Playlist followed"
+    );
+
+    if (state.activePlaylist?.id === id) {
+      await reloadActivePlaylist();
+    }
+
+    if (state.page === "home") {
+      state.homeFeedLoadedAt = 0;
+      await loadHome(true);
+    }
+
+    if (state.page === "library") {
+      await renderLibraryItems();
+    }
+  }
+
+  async function togglePlaylistLike() {
+    const playlist = state.activePlaylist;
+
+    if (!playlist) return;
+
+    await api(
+      `/api/playlists/${encodeURIComponent(playlist.id)}/like`,
+      {
+        method: playlist.liked ? "DELETE" : "POST"
+      }
+    );
+
+    await reloadActivePlaylist();
+  }
+
+  async function deletePlaylist() {
+    const playlist = state.activePlaylist;
+
+    if (!playlist) return;
+
+    if (!confirm("Delete this playlist?")) {
+      return;
+    }
+
+    await api(
+      `/api/playlists/${encodeURIComponent(playlist.id)}`,
+      { method: "DELETE" }
+    );
+
+    state.activePlaylist = null;
+    state.homeFeedLoadedAt = 0;
+
+    showToast("Playlist deleted");
+
+    setPage("library");
+    await renderLibraryItems();
+  }
+
+  async function followPerson(button) {
+    const id = button.dataset.id;
+    const previous = button.dataset.state || "";
+
+    if (!id) return;
+
+    if (previous === "accepted" || previous === "pending") {
+      await api(
+        `/api/people/${encodeURIComponent(id)}/follow`,
+        { method: "DELETE" }
+      );
+
+      button.dataset.state = "";
+      button.textContent = "Follow";
+
+      showToast(
+        previous === "pending"
+          ? "Follow request cancelled"
+          : "Unfollowed"
+      );
+
+    } else {
+      const data = await api(
+        `/api/people/${encodeURIComponent(id)}/follow`,
+        { method: "POST" }
+      );
+
+      button.dataset.state = data.status || "";
+      button.textContent =
+        data.status === "pending" ? "Requested" : "Following";
+
+      showToast(
+        data.status === "pending"
+          ? "Follow request sent"
+          : "Following"
+      );
+    }
+  }
+
+  async function respondFollow(button) {
+    await api(
+      `/api/people/${encodeURIComponent(button.dataset.id)}/follow-response`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action: button.dataset.choice
+        })
+      }
+    );
+
+    showToast("Follow request updated");
+
+    await loadNotifications();
+  }
+
+  async function respondInvitation(button) {
+    await api(
+      `/api/invitations/${encodeURIComponent(button.dataset.id)}/respond`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action: button.dataset.choice
+        })
+      }
+    );
+
+    showToast(
+      button.dataset.choice === "accept"
+        ? "Invitation accepted"
+        : "Invitation declined"
+    );
+
+    await loadNotifications();
+  }
+
+  async function markNotificationRead(button) {
+    await api(
+      `/api/notifications/${encodeURIComponent(button.dataset.id)}/read`,
+      { method: "POST" }
+    );
+
+    button.closest(".notification")?.classList.remove("unread");
+    button.innerHTML = icon("check", 16);
+
+    const unread = document.querySelector(
+      ".notification.unread"
+    );
+
+    $("notificationDot").hidden = !unread;
+  }
+
+  async function changeCollaboratorRole(id) {
+    const role = prompt(
+      "Choose: editor, contributor or viewer",
+      "editor"
+    );
+
+    if (!role) return;
+
+    if (!["editor", "contributor", "viewer"].includes(role)) {
+      throw new Error("Choose editor, contributor or viewer.");
+    }
+
+    await api(
+      `/api/playlists/${encodeURIComponent(state.activePlaylist.id)}/collaborators/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ role })
+      }
+    );
+
+    await reloadActivePlaylist();
+
+    showToast("Collaborator role updated");
+  }
+
+  async function removeCollaborator(id) {
+    if (!confirm("Remove this collaborator?")) {
+      return;
+    }
+
+    await api(
+      `/api/playlists/${encodeURIComponent(state.activePlaylist.id)}/collaborators/${encodeURIComponent(id)}`,
+      { method: "DELETE" }
+    );
+
+    await reloadActivePlaylist();
+
+    showToast("Collaborator removed");
+  }
+
+  async function sendInvitation() {
+    if (!state.selectedInvite) {
+      throw new Error("Choose a person first.");
+    }
+
+    if (!state.activePlaylist) {
+      throw new Error("Playlist is not open.");
+    }
+
+    await api(
+      `/api/playlists/${encodeURIComponent(state.activePlaylist.id)}/invitations`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: state.selectedInvite,
+          role: $("inviteRole").value
+        })
+      }
+    );
+
+    closeSheet();
+
+    showToast("Collaboration invitation sent");
+  }
+
+  async function toggleProfilePrivacy() {
+    const visibility = state.profile.visibility === "public"
+      ? "private"
+      : "public";
+
+    const data = await api(
+      "/api/profile",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ visibility })
+      }
+    );
+
+    state.profile = data.profile;
+
+    renderProfile();
+
+    showToast("Profile privacy updated");
+  }
+
+  // -------------------------------------------------------
+  // Telegram group player
+  // -------------------------------------------------------
+
+  async function restoreSelectedGroup() {
+    try {
+      const saved = localStorage.getItem(
+        "taalune.selectedGroup"
+      );
+
+      if (!saved || !/^-100\d{6,13}$/.test(saved)) {
+        return;
+      }
+
+      const chatId = Number(saved);
+
+      if (!Number.isSafeInteger(chatId)) {
+        localStorage.removeItem("taalune.selectedGroup");
+        return;
+      }
+
+      const data = await api(
+        `/api/groups/${encodeURIComponent(chatId)}/status`
+      );
+
+      state.selectedGroup = {
+        chat_id: chatId,
+        title: data.group.title
+      };
+
+      state.groupStatus = data.group;
+
+    } catch (_) {
+      state.selectedGroup = null;
+      state.groupStatus = null;
+
+      try {
+        localStorage.removeItem("taalune.selectedGroup");
+      } catch (_) {}
     }
   }
 
   function renderGroups() {
-    const preset = new URLSearchParams(location.search).get("chat_id") || "";
-    const value = state.selectedGroup?.chat_id || preset;
+    const preset =
+      new URLSearchParams(location.search).get("chat_id") || "";
+
+    const value =
+      state.selectedGroup?.chat_id || preset;
 
     $("page-groups").innerHTML = `
       <div class="eyebrow">Telegram voice chats</div>
+
       <h1 class="page-title">Group player</h1>
 
       <p class="muted small">
-        Connect a group to control its voice-chat playback.
-        Your personal player remains separate.
+        Connect your Telegram supergroup to control its voice-chat music.
+        Personal listening stays separate from group playback.
       </p>
 
-      <div class="searchbar">
-        ${svgIcon("users", 18)}
-        <input id="groupIdInput"
+      <div class="search-box" style="margin-top:17px">
+        ${icon("users", 18)}
+
+        <input
+          id="groupIdInput"
           inputmode="numeric"
           placeholder="Supergroup ID · -100…"
-          value="${esc(value)}">
+          value="${esc(value)}"
+        >
       </div>
 
-      <button class="primary" data-action="check-group">
-        Connect group
-      </button>
+      <div class="detail-actions">
+        <button class="primary-button" data-action="check-group">
+          Connect group
+        </button>
+
+        ${state.selectedGroup ? `
+          <button
+            class="secondary-button"
+            data-action="disconnect-group"
+          >
+            Disconnect
+          </button>
+        ` : ""}
+      </div>
 
       <div id="groupStatusPanel" style="margin-top:18px">
         <div class="empty">
@@ -916,7 +3233,16 @@
       </div>
     `;
 
-    if (state.selectedGroup) {
+    if (!state.selectedGroup) return;
+
+    if (
+      state.groupStatus &&
+      String(state.groupStatus.chat_id) ===
+        String(state.selectedGroup.chat_id)
+    ) {
+      renderGroupStatus(state.groupStatus);
+
+    } else {
       refreshGroupStatus().catch(error => {
         const panel = $("groupStatusPanel");
 
@@ -928,32 +3254,32 @@
     }
   }
 
-  async function refreshGroupStatus() {
-    if (!state.selectedGroup) {
-      throw new Error("Connect a group first.");
-    }
-
+  function renderGroupStatus(group) {
     const panel = $("groupStatusPanel");
     if (!panel) return;
 
-    const data = await api(
-      `/api/groups/${encodeURIComponent(state.selectedGroup.chat_id)}/status`
-    );
-
-    state.groupStatus = data.group;
-
-    const group = data.group;
     const current = group.current;
 
     panel.innerHTML = `
       <div class="group-panel">
-        <div class="row">
+        <div class="eyebrow">Connected group</div>
+
+        <div class="row" style="margin-top:8px">
           <div class="grow">
-            <div class="track-title">${esc(group.title)}</div>
+            <div class="track-title" style="font-size:16px">
+              ${esc(group.title)}
+            </div>
 
             <div class="track-sub">
-              ${esc(group.chat_id)}
-              · You: ${esc(group.user_status)}
+              Group ID: ${esc(group.chat_id)}
+            </div>
+
+            <div class="track-sub">
+              Assistant: ${esc(group.assistant_id)}
+            </div>
+
+            <div class="track-sub">
+              You: ${esc(group.user_status)}
             </div>
           </div>
 
@@ -975,64 +3301,86 @@
 
       ${current ? `
         <div class="track-row">
-          ${img(current.thumbnail, "track-cover")}
+          ${image(current.thumbnail, "track-cover")}
 
-          <div class="grow">
-            <div class="track-title">${esc(current.title)}</div>
+          <div class="track-copy">
+            <div class="track-title">
+              ${esc(current.title)}
+            </div>
 
             <div class="track-sub">
               ${esc(current.artist)}
-              · ${shortTime(current.duration_sec)}
+              · ${formatTime(current.duration_sec)}
             </div>
           </div>
         </div>
-      ` : '<div class="empty">Nothing is playing in this group.</div>'}
+      ` : `
+        <div class="empty">
+          Nothing is playing in this group.
+        </div>
+      `}
 
       ${group.can_control ? `
         <div class="detail-actions">
           ${group.active ? `
-            <button class="secondary"
+            <button
+              class="secondary-button"
               data-action="group-control"
-              data-command="${group.playing ? "pause" : "resume"}">
-              ${group.playing
-                ? `${svgIcon("pause", 15)} Pause`
-                : `${svgIcon("play", 15)} Resume`}
+              data-command="${group.playing ? "pause" : "resume"}"
+            >
+              ${icon(group.playing ? "pause" : "play", 15)}
+              ${group.playing ? "Pause" : "Resume"}
             </button>
 
-            <button class="secondary"
+            <button
+              class="secondary-button"
               data-action="group-control"
-              data-command="skip">
-              ${svgIcon("next", 15)} Next
+              data-command="skip"
+            >
+              ${icon("next", 15)}
+              Next
             </button>
 
-            <button class="danger"
+            <button
+              class="danger-button"
               data-action="group-control"
-              data-command="stop">
-              ${svgIcon("close", 15)} Stop
+              data-command="stop"
+            >
+              ${icon("close", 15)}
+              Stop
             </button>
           ` : `
-            <span class="small muted">
+            <span class="muted small">
               Search for a song or open a playlist to start group playback.
             </span>
           `}
 
-          <button class="secondary" data-action="refresh-group">
-            ${svgIcon("refresh", 15)} Refresh
+          <button
+            class="secondary-button"
+            data-action="refresh-group"
+          >
+            ${icon("refresh", 15)}
+            Refresh
           </button>
         </div>
       ` : `
         <div class="empty">
-          You are a group member, but only group admins or authorized users
-          can control playback.
+          You can view group status, but only group admins or authorized
+          users can control playback.
         </div>
 
-        <button class="secondary" data-action="refresh-group">
-          ${svgIcon("refresh", 15)} Refresh
+        <button
+          class="secondary-button"
+          data-action="refresh-group"
+        >
+          ${icon("refresh", 15)}
+          Refresh
         </button>
       `}
 
       <div class="section-head">
         <h2>Up next</h2>
+
         <span class="small muted">
           ${Number(group.queue_count || 0)} songs
         </span>
@@ -1041,16 +3389,51 @@
       <div class="list">
         ${(group.queue || []).map(track => `
           <div class="track-row">
-            ${img(track.thumbnail, "track-cover")}
+            ${image(track.thumbnail, "track-cover")}
 
-            <div class="grow">
-              <div class="track-title">${esc(track.title)}</div>
-              <div class="track-sub">${esc(track.artist)}</div>
+            <div class="track-copy">
+              <div class="track-title">
+                ${esc(track.title)}
+              </div>
+
+              <div class="track-sub">
+                ${esc(track.artist)}
+                · ${formatTime(track.duration_sec)}
+              </div>
             </div>
           </div>
-        `).join("") || '<div class="small muted">The queue is empty.</div>'}
+        `).join("") || `
+          <div class="empty">
+            The group queue is empty.
+          </div>
+        `}
       </div>
     `;
+  }
+
+  async function refreshGroupStatus() {
+    if (!state.selectedGroup) {
+      throw new Error("Connect a group first.");
+    }
+
+    const chatId = state.selectedGroup.chat_id;
+
+    const data = await api(
+      `/api/groups/${encodeURIComponent(chatId)}/status`
+    );
+
+    if (
+      !state.selectedGroup ||
+      Number(state.selectedGroup.chat_id) !== Number(chatId)
+    ) {
+      return null;
+    }
+
+    state.groupStatus = data.group;
+
+    renderGroupStatus(data.group);
+
+    return data.group;
   }
 
   async function connectGroup() {
@@ -1058,53 +3441,114 @@
     const raw = input?.value.trim() || "";
 
     if (!/^-100\d{6,13}$/.test(raw)) {
-      showToast("Enter a valid supergroup ID starting with -100.");
+      showToast(
+        "Enter a valid Telegram supergroup ID starting with -100."
+      );
       return;
     }
 
     const chatId = Number(raw);
 
     if (!Number.isSafeInteger(chatId)) {
-      showToast("That group ID is outside the supported range.");
+      showToast("This group ID is not supported.");
       return;
     }
 
     const panel = $("groupStatusPanel");
-    panel.innerHTML =
-      '<div class="empty">Checking membership and assistant…</div>';
+
+    if (panel) {
+      panel.innerHTML = `
+        <div class="empty">
+          Verifying group membership and playback assistant…
+        </div>
+      `;
+    }
+
+    state.selectedGroup = {
+      chat_id: chatId
+    };
+
+    state.groupStatus = null;
 
     try {
-      state.selectedGroup = { chat_id: chatId };
+      const group = await refreshGroupStatus();
 
-      await refreshGroupStatus();
-
-      showToast("Group connected");
-
-      if (state.page === "search" && state.searchMode === "music") {
-        await runSearch();
+      if (!group) {
+        throw new Error("Unable to verify selected group.");
       }
 
-      if (state.page === "home" && state.homeTracks.length) {
-        const target = $("homeTracks");
+      state.selectedGroup.title = group.title;
 
-        if (target) {
-          target.innerHTML = state.homeTracks.map((track, index) =>
-            trackRow(track, index, {
-              add: true,
-              group: true
-            })
-          ).join("");
-        }
-      }
+      try {
+        localStorage.setItem(
+          "taalune.selectedGroup",
+          String(chatId)
+        );
+      } catch (_) {}
+
+      refreshTrackActions();
+
+      showToast("Group connected successfully");
+
+      renderGroups();
 
     } catch (error) {
       state.selectedGroup = null;
       state.groupStatus = null;
 
-      panel.innerHTML =
-        `<div class="empty group-error">${esc(error.message)}</div>`;
+      try {
+        localStorage.removeItem("taalune.selectedGroup");
+      } catch (_) {}
+
+      if (panel) {
+        panel.innerHTML =
+          `<div class="empty group-error">${esc(error.message)}</div>`;
+      }
 
       showToast(error.message);
+    }
+  }
+
+  function disconnectGroup() {
+    state.selectedGroup = null;
+    state.groupStatus = null;
+
+    try {
+      localStorage.removeItem("taalune.selectedGroup");
+    } catch (_) {}
+
+    refreshTrackActions();
+
+    if (state.page === "groups") {
+      renderGroups();
+    }
+
+    showToast("Group disconnected");
+  }
+
+  function refreshTrackActions() {
+    const home = $("homeTracks");
+
+    if (home && state.homeTracks.length) {
+      refreshHomeTrackRows();
+    }
+
+    if (
+      state.page === "search" &&
+      state.searchMode === "music"
+    ) {
+      renderSearchResults();
+    }
+
+    if (state.page === "playlist") {
+      renderPlaylist();
+    }
+
+    if (
+      state.page === "library" &&
+      state.libraryScope === "liked"
+    ) {
+      renderLibraryItems();
     }
   }
 
@@ -1113,11 +3557,16 @@
       throw new Error("Connect a group first.");
     }
 
+    const chatId = state.selectedGroup.chat_id;
+
     const data = await api(
-      `/api/groups/${encodeURIComponent(state.selectedGroup.chat_id)}/control`,
+      `/api/groups/${encodeURIComponent(chatId)}/control`,
       {
         method: "POST",
-        body: JSON.stringify({ action, ...payload })
+        body: JSON.stringify({
+          action,
+          ...payload
+        })
       }
     );
 
@@ -1125,7 +3574,7 @@
       showToast(
         `Added to group queue${
           data.position !== undefined
-            ? ` · position ${data.position + 1}`
+            ? ` · position ${Number(data.position) + 1}`
             : ""
         }`
       );
@@ -1143,1098 +3592,246 @@
     await refreshGroupStatus();
   }
 
-  function renderProfile() {
-    const profile = state.profile;
+  function trackPayload(track) {
+    return {
+      id: track.id,
+      title: track.title,
+      artist: track.artist || "Unknown artist",
+      duration_sec: Number(track.duration_sec || 0),
+      thumbnail: track.thumbnail || null
+    };
+  }
 
-    if (!profile) {
-      $("page-profile").innerHTML =
-        '<div class="empty">Loading profile…</div>';
-      return;
+  async function groupTrack(track, playNow) {
+    if (!state.selectedGroup) {
+      throw new Error("Connect a group first.");
     }
 
-    const avatar = profile.avatar_url
-      ? `<img class="profile-big-avatar" src="${esc(profile.avatar_url)}" alt="">`
-      : `<div class="profile-big-avatar profile-placeholder">${svgIcon("user", 38)}</div>`;
-
-    $("page-profile").innerHTML = `
-      <div class="eyebrow">Your account</div>
-
-      <div class="profile-head">
-        ${avatar}
-
-        <h1 style="margin:0;font-size:25px">
-          ${esc(profile.display_name)}
-        </h1>
-
-        <div class="muted" style="margin-top:4px">
-          @${esc(profile.handle)}
-        </div>
-
-        <p class="muted"
-          style="font-size:13px;max-width:420px;margin:12px auto">
-          ${esc(profile.bio || "")}
-        </p>
-
-        <div class="stat-row">
-          <div class="stat">
-            <strong>${Number(profile.followers || 0)}</strong>
-            <span>Followers</span>
-          </div>
-
-          <div class="stat">
-            <strong>${Number(profile.following || 0)}</strong>
-            <span>Following</span>
-          </div>
-        </div>
-
-        <button class="secondary" data-action="edit-profile">
-          Edit profile
-        </button>
-      </div>
-
-      <div class="divider"></div>
-
-      <div class="section-head">
-        <h2>Your public playlists</h2>
-        <button data-page="library">Library</button>
-      </div>
-
-      <div id="profilePlaylists" class="grid"></div>
-
-      <div class="section-head">
-        <h2>Privacy</h2>
-      </div>
-
-      <div class="track-row">
-        <div class="grow">
-          <div class="track-title">Profile visibility</div>
-          <div class="track-sub">${esc(profile.visibility)}</div>
-        </div>
-
-        <button class="secondary" data-action="toggle-profile-privacy">
-          Change
-        </button>
-      </div>
-    `;
-
-    api("/api/playlists?scope=mine&limit=30")
-      .then(data => {
-        const target = $("profilePlaylists");
-        if (!target) return;
-
-        const publicItems = (data.results || []).filter(
-          item => item.visibility === "public"
-        );
-
-        target.innerHTML = publicItems.length
-          ? publicItems.map(playlistCard).join("")
-          : '<div class="empty" style="grid-column:1/-1">No public playlists yet.</div>';
-      })
-      .catch(() => {});
-  }
-
-  async function loadNotifications() {
-    const page = $("page-notifications");
-
-    page.innerHTML = `
-      <div class="eyebrow">Your activity</div>
-      <h1 class="page-title">Notifications</h1>
-      <div id="notificationItems" class="list"></div>
-    `;
-
-    try {
-      const data = await api("/api/notifications?limit=40");
-      state.notifications = data.results || [];
-
-      $("notificationItems").innerHTML = state.notifications.length
-        ? state.notifications.map(notification => {
-            const payload = notification.payload || {};
-            const actor = esc(notification.actor?.display_name || "Someone");
-
-            let message = "You have an update.";
-            let actions = "";
-            let iconName = "bell";
-
-            if (notification.type === "collaboration_invitation") {
-              iconName = "users";
-
-              message =
-                `${actor} invited you to collaborate on <b>${esc(payload.playlist_name)}</b> as ${esc(payload.role)}.`;
-
-              actions = `
-                <button class="primary"
-                  data-action="invitation"
-                  data-id="${esc(payload.invitation_id)}"
-                  data-choice="accept">
-                  Accept
-                </button>
-
-                <button class="secondary"
-                  data-action="invitation"
-                  data-id="${esc(payload.invitation_id)}"
-                  data-choice="reject">
-                  Decline
-                </button>
-              `;
-
-            } else if (notification.type === "follow_request") {
-              iconName = "heart";
-
-              message = `${actor} wants to follow you.`;
-
-              actions = `
-                <button class="primary"
-                  data-action="follow-response"
-                  data-id="${esc(payload.follower_id)}"
-                  data-choice="accept">
-                  Accept
-                </button>
-
-                <button class="secondary"
-                  data-action="follow-response"
-                  data-id="${esc(payload.follower_id)}"
-                  data-choice="reject">
-                  Decline
-                </button>
-              `;
-
-            } else if (notification.type === "new_follower") {
-              iconName = "heart";
-              message = `${actor} started following you.`;
-
-            } else if (notification.type === "playlist_followed") {
-              iconName = "music";
-              message =
-                `${actor} followed your playlist <b>${esc(payload.playlist_name)}</b>.`;
-
-            } else if (notification.type === "follow_accepted") {
-              iconName = "heart";
-              message = `${actor} accepted your follow request.`;
-
-            } else if (notification.type === "collaboration_role_changed") {
-              iconName = "sparkle";
-              message =
-                `Your role on <b>${esc(payload.playlist_name)}</b> is now ${esc(payload.role)}.`;
-
-            } else if (notification.type === "collaboration_removed") {
-              iconName = "users";
-              message = `You were removed from <b>${esc(payload.playlist_name)}</b>.`;
-
-            } else if (notification.type === "collaboration_accepted") {
-              iconName = "check";
-              message = `${actor} accepted your invitation to <b>${esc(payload.playlist_name)}</b>.`;
-
-            } else if (notification.type === "collaboration_rejected") {
-              iconName = "close";
-              message = `${actor} declined your invitation to <b>${esc(payload.playlist_name)}</b>.`;
-
-            } else if (notification.type.startsWith("collaboration_")) {
-              iconName = "users";
-
-              message =
-                `${actor} ${esc(
-                  notification.type
-                    .replace("collaboration_", "collaboration ")
-                    .replaceAll("_", " ")
-                )} ${esc(payload.playlist_name || "your playlist")}.`;
-            }
-
-            return `
-              <div class="notification ${notification.read ? "" : "unread"}">
-                <div class="notification-icon">
-                  ${svgIcon(iconName, 21)}
-                </div>
-
-                <div class="grow">
-                  <p>${message}</p>
-
-                  <div class="small muted" style="margin-top:6px">
-                    ${esc(notification.created_at || "")}
-                  </div>
-
-                  ${actions
-                    ? `<div class="notification-actions">${actions}</div>`
-                    : ""}
-                </div>
-
-                <button class="ghost"
-                  data-action="read-notification"
-                  data-id="${esc(notification.id)}"
-                  aria-label="Mark notification read">
-                  ${notification.read ? "" : svgIcon("check", 16)}
-                </button>
-              </div>
-            `;
-          }).join("")
-        : '<div class="empty">You are all caught up.</div>';
-
-    } catch (error) {
-      $("notificationItems").innerHTML =
-        `<div class="empty">${esc(error.message)}</div>`;
-    }
-  }
-
-  async function openPlaylist(id) {
-    try {
-      const data = await api(`/api/playlists/${encodeURIComponent(id)}`);
-      state.activePlaylist = data.playlist;
-      go("playlist");
-
-    } catch (error) {
-      showToast(error.message);
-    }
-  }
-
-  function renderPlaylist() {
-    const playlist = state.activePlaylist;
-
-    if (!playlist) {
-      $("page-playlist").innerHTML =
-        '<div class="empty">Playlist not found.</div>';
-      return;
+    if (!track?.id) {
+      throw new Error("Song details are unavailable.");
     }
 
-    const canEdit = ["owner", "editor"].includes(playlist.role);
-    const canAdd = ["owner", "editor", "contributor"].includes(playlist.role);
-    const isOwner = playlist.role === "owner";
-    const tracks = playlist.tracks || [];
-
-    const cover = coverImage(
-      playlist.cover_url,
-      "detail-cover",
-      playlist.icon
-    );
-
-    $("page-playlist").innerHTML = `
-      <button class="ghost" data-page="library">
-        ← Back to library
-      </button>
-
-      <div class="detail-head">
-        ${cover}
-
-        <div class="grow">
-          <div class="eyebrow">
-            ${esc(playlist.visibility)} playlist
-          </div>
-
-          <div class="detail-name">${esc(playlist.name)}</div>
-
-          <div class="small muted" style="margin-top:7px">
-            ${tracks.length} songs
-            · by @${esc(playlist.owner?.handle || "listener")}
-          </div>
-
-          <div class="small muted" style="margin-top:4px">
-            ${svgIcon("heart", 13)}
-            ${Number(playlist.like_count || 0)}
-            · ${Number(playlist.follower_count || 0)} followers
-          </div>
-        </div>
-      </div>
-
-      <p class="muted small">
-        ${esc(playlist.description || "")}
-      </p>
-
-      <div class="detail-actions">
-        <button class="primary"
-          data-action="play-playlist"
-          ${tracks.length ? "" : "disabled"}>
-          ${svgIcon("play", 15)} Play
-        </button>
-
-        <button class="secondary"
-          data-action="like-playlist"
-          data-id="${esc(playlist.id)}">
-          ${playlist.liked
-            ? `${svgIcon("heartFill", 15)} Liked`
-            : `${svgIcon("heart", 15)} Like`}
-        </button>
-
-        ${playlist.owner?.user_id !== state.profile?.user_id ? `
-          <button class="secondary"
-            data-action="playlist-follow"
-            data-id="${esc(playlist.id)}">
-            ${playlist.followed ? "Following" : "Follow"}
-          </button>
-        ` : ""}
-
-        ${canAdd
-          ? `<button class="secondary" data-action="add-from-search">
-               ${svgIcon("plus", 15)} Add songs
-             </button>`
-          : ""}
-
-        ${state.selectedGroup ? `
-          <button class="secondary" data-action="group-play-playlist">
-            ${svgIcon("users", 15)} Play in group
-          </button>
-
-          <button class="secondary" data-action="group-queue-playlist">
-            ${svgIcon("plus", 15)} Queue in group
-          </button>
-        ` : ""}
-
-        ${canEdit
-          ? '<button class="secondary" data-action="edit-playlist">Edit</button>'
-          : ""}
-
-        ${isOwner ? `
-          <button class="secondary" data-action="invite-collaborator">
-            ${svgIcon("users", 15)} Invite
-          </button>
-
-          <button class="danger" data-action="delete-playlist">
-            Delete
-          </button>
-        ` : ""}
-      </div>
-
-      <div class="section-head">
-        <h2>Tracks</h2>
-        <span class="small muted">${tracks.length} songs</span>
-      </div>
-
-      <div id="playlistTracks" class="list">
-        ${tracks.length
-          ? tracks.map((track, index) => trackRow(track, index, {
-              draggable: canEdit,
-              reorder: canEdit,
-              remove: canEdit,
-              group: Boolean(state.selectedGroup)
-            })).join("")
-          : '<div class="empty">This playlist is empty. Add a song whenever you like.</div>'}
-      </div>
-
-      ${isOwner ? `
-        <div class="section-head">
-          <h2>Collaborators</h2>
-        </div>
-
-        <div class="list">
-          ${(playlist.collaborators || []).map(collaborator => `
-            <div class="person-row">
-              <div class="grow">
-                <div class="track-title">
-                  ${esc(collaborator.display_name || collaborator.handle || "Listener")}
-                </div>
-
-                <div class="track-sub">
-                  @${esc(collaborator.handle || "unknown")}
-                  · ${esc(collaborator.role)}
-                </div>
-              </div>
-
-              <button class="track-action"
-                data-action="remove-collaborator"
-                data-id="${esc(collaborator.user_id)}"
-                title="Remove collaborator">
-                ${svgIcon("close", 17)}
-              </button>
-
-              <button class="track-action"
-                data-action="change-collaborator"
-                data-id="${esc(collaborator.user_id)}"
-                title="Change role">
-                ${svgIcon("users", 17)}
-              </button>
-            </div>
-          `).join("") || '<div class="small muted">No collaborators yet.</div>'}
-        </div>
-      ` : ""}
-    `;
-  }
-
-  async function reloadActivePlaylist() {
-    if (!state.activePlaylist) return;
-
-    const data = await api(
-      `/api/playlists/${encodeURIComponent(state.activePlaylist.id)}`
-    );
-
-    state.activePlaylist = data.playlist;
-    renderPlaylist();
-  }
-
-  function openSheet(title, body, actions) {
-    $("sheetTitle").textContent = title;
-    $("sheetBody").innerHTML = body;
-    $("sheetActions").innerHTML = actions;
-    $("sheetOverlay").classList.add("open");
-  }
-
-  function closeSheet() {
-    $("sheetOverlay").classList.remove("open");
-    state.selectedInvite = null;
-    state.modalTrack = null;
-    for (const objectUrl of previewObjectUrls.values()) URL.revokeObjectURL(objectUrl);
-    previewObjectUrls.clear();
-  }
-
-  function createPlaylistSheet() {
-    openSheet(
-      "Create playlist",
-      `
-        <div class="field">
-          <label>PLAYLIST NAME</label>
-          <input id="newPlaylistName"
-            maxlength="80"
-            placeholder="Give it a name">
-        </div>
-
-        <div class="field">
-          <label>DESCRIPTION</label>
-          <textarea id="newPlaylistDescription"
-            maxlength="500"
-            placeholder="What is this playlist about?"></textarea>
-        </div>
-
-        <div class="field">
-          <label>PLAYLIST ICON</label>
-          <select id="newPlaylistIcon">
-            <option value="music">Music</option>
-            <option value="heart">Heart</option>
-            <option value="chill">Chill</option>
-            <option value="star">Star</option>
-            <option value="headphones">Headphones</option>
-            <option value="group">Group</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <label>VISIBILITY</label>
-          <select id="newPlaylistVisibility">
-            <option value="private">Private</option>
-            <option value="public">Public</option>
-            <option value="unlisted">Unlisted · link only</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <label>PLAYLIST COVER</label>
-
-          <div class="upload-row">
-            <input id="newPlaylistCoverFile"
-              type="file"
-              accept="image/jpeg,image/png,image/webp">
-
-            <button class="secondary"
-              data-action="upload-cover"
-              data-file="newPlaylistCoverFile"
-              data-target="newPlaylistCover">
-              ${svgIcon("upload", 15)} Upload
-            </button>
-          </div>
-
-          <div class="upload-help">
-            Upload JPG, PNG or WebP to Catbox. Maximum 5 MB.
-          </div>
-          <div id="newPlaylistCoverPreviewWrap" hidden><img id="newPlaylistCoverPreview" alt="Playlist cover preview" width="76" height="76" style="width:76px;height:76px;object-fit:cover;border-radius:12px;border:1px solid var(--line)"></div>
-          <div id="newPlaylistCoverProgressWrap" hidden><progress id="newPlaylistCoverProgress" max="100" value="0" style="width:100%;height:8px;accent-color:var(--accent)"></progress><div id="newPlaylistCoverStatus" class="upload-progress" role="status" aria-live="polite"></div></div>
-          <input id="newPlaylistCover"
-            type="url"
-            maxlength="2048"
-            placeholder="Or paste an HTTPS image URL">
-        </div>
-      `,
-      `
-        <button class="secondary" data-action="close-sheet">
-          Cancel
-        </button>
-
-        <button class="primary" data-action="save-playlist">
-          Create playlist
-        </button>
-      `
-    );
-  }
-
-  function editPlaylistSheet() {
-    const playlist = state.activePlaylist;
-
-    openSheet(
-      "Edit playlist",
-      `
-        <div class="field">
-          <label>NAME</label>
-          <input id="editPlaylistName"
-            maxlength="80"
-            value="${esc(playlist.name)}">
-        </div>
-
-        <div class="field">
-          <label>DESCRIPTION</label>
-          <textarea id="editPlaylistDescription"
-            maxlength="500">${esc(playlist.description || "")}</textarea>
-        </div>
-
-        <div class="field">
-          <label>PLAYLIST ICON</label>
-          <select id="editPlaylistIcon">
-            <option value="music" ${playlist.icon === "music" ? "selected" : ""}>Music</option>
-            <option value="heart" ${playlist.icon === "heart" ? "selected" : ""}>Heart</option>
-            <option value="chill" ${playlist.icon === "chill" ? "selected" : ""}>Chill</option>
-            <option value="star" ${playlist.icon === "star" ? "selected" : ""}>Star</option>
-            <option value="headphones" ${playlist.icon === "headphones" ? "selected" : ""}>Headphones</option>
-            <option value="group" ${playlist.icon === "group" ? "selected" : ""}>Group</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <label>PLAYLIST COVER</label>
-
-          <div class="upload-row">
-            <input id="editPlaylistCoverFile"
-              type="file"
-              accept="image/jpeg,image/png,image/webp">
-
-            <button class="secondary"
-              data-action="upload-cover"
-              data-file="editPlaylistCoverFile"
-              data-target="editPlaylistCover">
-              ${svgIcon("upload", 15)} Upload
-            </button>
-          </div>
-
-          <div class="upload-help">
-            Upload JPG, PNG or WebP to Catbox. Maximum 5 MB.
-          </div>
-          <div id="editPlaylistCoverPreviewWrap" hidden><img id="editPlaylistCoverPreview" alt="Playlist cover preview" width="76" height="76" style="width:76px;height:76px;object-fit:cover;border-radius:12px;border:1px solid var(--line)"></div>
-          <div id="editPlaylistCoverProgressWrap" hidden><progress id="editPlaylistCoverProgress" max="100" value="0" style="width:100%;height:8px;accent-color:var(--accent)"></progress><div id="editPlaylistCoverStatus" class="upload-progress" role="status" aria-live="polite"></div></div>
-          <input id="editPlaylistCover"
-            type="url"
-            maxlength="2048"
-            value="${esc(playlist.cover_url || "")}"
-            placeholder="Or paste an HTTPS image URL">
-        </div>
-
-        ${playlist.role === "owner" ? `
-          <div class="field">
-            <label>VISIBILITY</label>
-            <select id="editPlaylistVisibility">
-              <option value="private" ${playlist.visibility === "private" ? "selected" : ""}>Private</option>
-              <option value="public" ${playlist.visibility === "public" ? "selected" : ""}>Public</option>
-              <option value="unlisted" ${playlist.visibility === "unlisted" ? "selected" : ""}>Unlisted</option>
-            </select>
-          </div>
-        ` : ""}
-      `,
-      `
-        <button class="secondary" data-action="close-sheet">
-          Cancel
-        </button>
-
-        <button class="primary" data-action="save-playlist-edit">
-          Save changes
-        </button>
-      `
-    );
-  }
-
-  function addTrackSheet(track) {
-    state.modalTrack = track;
-
-    const options = state.playlists.map(playlist =>
-      `<option value="${esc(playlist.id)}">${esc(playlist.name)}</option>`
-    ).join("");
-
-    openSheet(
-      "Add to playlist",
-      `
-        <div class="track-row">
-          ${img(track.thumbnail, "track-cover")}
-
-          <div class="grow">
-            <div class="track-title">${esc(track.title)}</div>
-            <div class="track-sub">${esc(track.artist || "Unknown artist")}</div>
-          </div>
-        </div>
-
-        <div class="field">
-          <label>CHOOSE PLAYLIST</label>
-
-          <select id="targetPlaylist">
-            ${options || '<option value="">No playlists</option>'}
-          </select>
-        </div>
-      `,
-      `
-        <button class="secondary" data-action="close-sheet">
-          Cancel
-        </button>
-
-        <button class="primary"
-          data-action="confirm-add-track"
-          ${options ? "" : "disabled"}>
-          Add song
-        </button>
-      `
-    );
-  }
-
-  async function inviteSheet() {
-    if (!state.playlists.length) {
-      const data = await api("/api/playlists?scope=mine&limit=50");
-      state.playlists = data.results || [];
-    }
-
-    openSheet(
-      "Invite collaborator",
-      `
-        <div class="field">
-          <label>SEARCH PEOPLE</label>
-          <input id="inviteSearch"
-            placeholder="Search by name or username"
-            maxlength="64">
-        </div>
-
-        <div id="invitePeople" class="list"></div>
-
-        <div class="field">
-          <label>ROLE</label>
-          <select id="inviteRole">
-            <option value="editor">Editor · add, remove, reorder</option>
-            <option value="contributor">Contributor · add songs</option>
-            <option value="viewer">Viewer · view and play</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <label>PLAYLIST</label>
-          <select id="invitePlaylist">
-            <option value="${esc(state.activePlaylist.id)}">
-              ${esc(state.activePlaylist.name)}
-            </option>
-          </select>
-        </div>
-      `,
-      `
-        <button class="secondary" data-action="close-sheet">
-          Cancel
-        </button>
-
-        <button class="primary"
-          data-action="send-invite"
-          disabled
-          id="sendInviteButton">
-          Send invite
-        </button>
-      `
-    );
-
-    $("inviteSearch").addEventListener("input", () => {
-      clearTimeout(inviteSheet.timer);
-      inviteSheet.timer = setTimeout(searchInvitePeople, 260);
-    });
-  }
-
-  async function searchInvitePeople() {
-    const input = $("inviteSearch");
-    if (!input) return;
-
-    const query = input.value.trim();
-    const target = $("invitePeople");
-    const send = $("sendInviteButton");
-
-    if (query.length < 2) {
-      target.innerHTML =
-        '<div class="small muted">Type at least two characters.</div>';
-      return;
-    }
-
-    try {
-      const data = await api(
-        `/api/search/people?q=${encodeURIComponent(query)}&limit=10`
-      );
-
-      state.modalPeople = data.results || [];
-
-      target.innerHTML = state.modalPeople.map(person => `
-        <button class="person-row"
-          style="width:100%;text-align:left;background:transparent"
-          data-action="select-invitee"
-          data-id="${esc(person.user_id)}">
-
-          ${img(person.avatar_url, "person-avatar")}
-
-          <span class="grow">
-            <b>${esc(person.display_name)}</b>
-            <span class="track-sub">@${esc(person.handle)}</span>
-          </span>
-
-          <span>
-            ${state.selectedInvite === person.user_id
-              ? svgIcon("check", 17)
-              : svgIcon("plus", 17)}
-          </span>
-        </button>
-      `).join("") || '<div class="small muted">No matching people.</div>';
-
-      if (send) {
-        send.disabled = !state.selectedInvite;
+    await groupControl(
+      playNow ? "play_track" : "queue_track",
+      {
+        track: trackPayload(track)
       }
-
-    } catch (error) {
-      showToast(error.message);
-    }
-  }
-
-  function editProfileSheet() {
-    const profile = state.profile;
-
-    openSheet(
-      "Edit profile",
-      `
-        <div class="field">
-          <label>USERNAME</label>
-          <input id="profileHandle"
-            maxlength="24"
-            value="${esc(profile.handle)}">
-        </div>
-
-        <div class="field">
-          <label>DISPLAY NAME</label>
-          <input id="profileName"
-            maxlength="48"
-            value="${esc(profile.display_name)}">
-        </div>
-
-        <div class="field">
-          <label>BIO</label>
-          <textarea id="profileBio"
-            maxlength="160">${esc(profile.bio || "")}</textarea>
-        </div>
-
-        <div class="field">
-          <label>PROFILE IMAGE</label>
-
-          <div class="upload-row">
-            <input id="profileAvatarFile"
-              type="file"
-              accept="image/jpeg,image/png,image/webp">
-
-            <button class="secondary"
-              data-action="upload-cover"
-              data-file="profileAvatarFile"
-              data-target="profileAvatar">
-              ${svgIcon("upload", 15)} Upload
-            </button>
-          </div>
-
-          <div class="upload-help">
-            Upload JPG, PNG or WebP to Catbox. Maximum 5 MB.
-          </div>
-          <div id="profileAvatarPreviewWrap" hidden><img id="profileAvatarPreview" alt="Profile avatar preview" width="76" height="76" style="width:76px;height:76px;object-fit:cover;border-radius:50%;border:1px solid var(--line)"></div>
-          <div id="profileAvatarProgressWrap" hidden><progress id="profileAvatarProgress" max="100" value="0" style="width:100%;height:8px;accent-color:var(--accent)"></progress><div id="profileAvatarStatus" class="upload-progress" role="status" aria-live="polite"></div></div>
-          <input id="profileAvatar"
-            type="url"
-            maxlength="2048"
-            value="${esc(profile.avatar_url || "")}"
-            placeholder="Or paste an HTTPS image URL">
-        </div>
-
-        <div class="field">
-          <label>PROFILE VISIBILITY</label>
-          <select id="profileVisibility">
-            <option value="public" ${profile.visibility === "public" ? "selected" : ""}>Public</option>
-            <option value="private" ${profile.visibility === "private" ? "selected" : ""}>Private</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <label>SEARCH DISCOVERY</label>
-          <select id="profileDiscoverable">
-            <option value="true" ${profile.discoverable !== false ? "selected" : ""}>
-              Allow people to find me
-            </option>
-
-            <option value="false" ${profile.discoverable === false ? "selected" : ""}>
-              Hide me from people search
-            </option>
-          </select>
-        </div>
-      `,
-      `
-        <button class="secondary" data-action="close-sheet">
-          Cancel
-        </button>
-
-        <button class="primary" data-action="save-profile">
-          Save changes
-        </button>
-      `
     );
   }
 
-  function setUploadPreview(config, source, isObjectUrl) {
-    const image = $(config.preview);
-    const wrapper = $(config.wrap);
-    if (!image || !wrapper) return;
-    const oldUrl = previewObjectUrls.get(config.preview);
-    if (oldUrl) { URL.revokeObjectURL(oldUrl); previewObjectUrls.delete(config.preview); }
-    image.src = source || "";
-    wrapper.hidden = !source;
-    if (source && isObjectUrl) previewObjectUrls.set(config.preview, source);
-  }
+  // -------------------------------------------------------
+  // Personal audio player
+  // -------------------------------------------------------
 
-  async function uploadCover(fileInputId, targetInputId, button) {
-    const input = $(fileInputId);
-    const target = $(targetInputId);
-    const file = input && input.files ? input.files[0] : null;
-    const config = UPLOAD_FIELDS[fileInputId];
-    if (!file || !target || !config) throw new Error("Choose an image first.");
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("Use a JPG, PNG or WebP image.");
-    if (file.size <= 0) throw new Error("The selected image is empty.");
-    if (file.size > 5 * 1024 * 1024) throw new Error("Image must be 5 MB or smaller.");
-    const form = new FormData();
-    form.append("fileToUpload", file, file.name);
-    const progressWrap = $(config.progressWrap);
-    const progress = $(config.progress);
-    const status = $(config.status);
-    const originalText = button ? button.innerHTML : "";
-    if (progressWrap) progressWrap.hidden = false;
-    if (progress) progress.value = 0;
-    if (status) status.textContent = "Preparing upload…";
-    if (button) { button.disabled = true; button.textContent = "Uploading…"; }
-    try {
-      const result = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/api/upload/cover", true);
-        xhr.setRequestHeader("X-Telegram-Init-Data", initData);
-        xhr.timeout = 50000;
-        xhr.upload.addEventListener("progress", event => {
-          if (!event.lengthComputable) { if (status) status.textContent = "Uploading image…"; return; }
-          const percent = Math.min(100, Math.round(event.loaded / event.total * 100));
-          if (progress) progress.value = percent;
-          if (status) status.textContent = "Uploading… " + percent + "%";
-        });
-        xhr.addEventListener("load", () => {
-          let data;
-          try { data = JSON.parse(xhr.responseText || "{}"); }
-          catch (_) { reject(new Error("The upload server returned an invalid response.")); return; }
-          if (xhr.status < 200 || xhr.status >= 300 || data.ok !== true) {
-            const code = data.error || "";
-            reject(new Error(API_MESSAGES[code] || data.message || code || ("Upload failed (" + xhr.status + ")")));
-            return;
-          }
-          if (typeof data.url !== "string" || data.url.length > 2048) { reject(new Error("Catbox did not return a valid image URL.")); return; }
-          let parsed;
-          try { parsed = new URL(data.url); }
-          catch (_) { reject(new Error("Catbox returned an invalid image URL.")); return; }
-          if (parsed.protocol !== "https:" || parsed.hostname !== "files.catbox.moe" || parsed.username || parsed.password || parsed.search || parsed.hash || !parsed.pathname.startsWith("/")) { reject(new Error("Catbox returned an invalid image URL.")); return; }
-          resolve(data);
-        });
-        xhr.addEventListener("error", () => reject(new Error("Network error while uploading to Catbox.")));
-        xhr.addEventListener("abort", () => reject(new Error("Image upload was cancelled.")));
-        xhr.addEventListener("timeout", () => reject(new Error("Image upload timed out. Try again.")));
-        // Keep multipart Content-Type unset so the browser adds its boundary.
-        xhr.send(form);
-      });
-      target.value = result.url;
-      setUploadPreview(config, result.url, false);
-      if (progress) progress.value = 100;
-      if (status) status.textContent = "Upload complete.";
-      showToast("Image uploaded to Catbox");
-      return result.url;
-    } catch (error) {
-      if (status) status.textContent = error.message || "Upload failed.";
-      throw error;
-    } finally {
-      if (button) { button.disabled = false; button.innerHTML = originalText; }
-    }
-  }
-  async function openPerson(handle) {
-    try {
-      const data = await api(
-        `/api/people/${encodeURIComponent(handle)}`
-      );
+  function resetShuffleBag() {
+    state.shuffleBag = [];
 
-      state.activePerson = data;
+    if (!state.queue.length) return;
 
-      const person = data.profile;
+    state.shuffleBag = state.queue
+      .map((_, index) => index)
+      .filter(index => index !== state.queueIndex);
 
-      const personAvatar = person.avatar_url
-        ? img(person.avatar_url, "profile-big-avatar")
-        : `<div class="profile-big-avatar profile-placeholder">${svgIcon("user", 38)}</div>`;
+    for (let index = state.shuffleBag.length - 1; index > 0; index--) {
+      const other = Math.floor(Math.random() * (index + 1));
 
-      $("page-person").innerHTML = `
-        <button class="ghost" data-page="search">
-          ← Back
-        </button>
-
-        <div class="profile-head">
-          ${personAvatar}
-
-          <h1 style="margin:0;font-size:25px">
-            ${esc(person.display_name)}
-          </h1>
-
-          <div class="muted" style="margin-top:4px">
-            @${esc(person.handle)}
-          </div>
-
-          <p class="muted small">${esc(person.bio || "")}</p>
-
-          <div class="stat-row">
-            <div class="stat">
-              <strong>${Number(person.followers || 0)}</strong>
-              <span>Followers</span>
-            </div>
-
-            <div class="stat">
-              <strong>${Number(person.following || 0)}</strong>
-              <span>Following</span>
-            </div>
-          </div>
-
-          ${person.is_self ? "" : `
-            <button class="primary"
-              data-action="follow-person"
-              data-id="${esc(person.user_id)}"
-              data-state="${esc(person.follow_state || "")}">
-              ${person.follow_state === "accepted"
-                ? "Following"
-                : person.follow_state === "pending"
-                  ? "Requested"
-                  : "Follow"}
-            </button>
-          `}
-        </div>
-
-        <div class="section-head">
-          <h2>Public playlists</h2>
-        </div>
-
-        <div class="grid">
-          ${(data.playlists || []).map(playlistCard).join("") ||
-            '<div class="empty" style="grid-column:1/-1">No public playlists.</div>'}
-        </div>
-      `;
-
-      go("person");
-
-    } catch (error) {
-      showToast(error.message);
+      [
+        state.shuffleBag[index],
+        state.shuffleBag[other]
+      ] = [
+        state.shuffleBag[other],
+        state.shuffleBag[index]
+      ];
     }
   }
 
-  function openQueue() {
-    $("queueCaption").textContent = state.currentTrack
-      ? `Playing ${state.currentTrack.title}`
-      : "Nothing playing";
+  function pickShuffleIndex() {
+    if (state.queue.length <= 1) {
+      return state.queueIndex;
+    }
 
-    $("queueItems").innerHTML = state.queue.length
-      ? state.queue.map((track, index) => `
-          <div class="track-row">
-            ${img(track.thumbnail, "track-cover")}
+    if (!state.shuffleBag.length) {
+      resetShuffleBag();
+    }
 
-            <div class="grow">
-              <div class="track-title">
-                ${index === state.queueIndex
-                  ? `${svgIcon("play", 12)} `
-                  : ""}
-                ${esc(track.title)}
-              </div>
+    if (!state.shuffleBag.length) {
+      return state.queueIndex;
+    }
 
-              <div class="track-sub">
-                ${esc(track.artist || "")}
-              </div>
-            </div>
+    return state.shuffleBag.pop();
+  }
 
-            <button class="track-action"
-              data-action="queue-play"
-              data-index="${index}"
-              title="Play">
-              ${svgIcon("play", 16)}
-            </button>
+  function updateRepeatButton() {
+    const button = $("repeatButton");
+    if (!button) return;
 
-            <button class="track-action remove-track"
-              data-action="queue-remove"
-              data-index="${index}"
-              title="Remove">
-              ${svgIcon("trash", 16)}
-            </button>
-          </div>
-        `).join("")
-      : '<div class="empty">Queue is empty.</div>';
+    button.classList.toggle(
+      "active",
+      state.repeatMode !== 0
+    );
 
-    $("queueOverlay").classList.add("open");
+    button.dataset.mode = String(state.repeatMode);
+
+    button.setAttribute(
+      "aria-label",
+      [
+        "Repeat off",
+        "Repeat all",
+        "Repeat one"
+      ][state.repeatMode]
+    );
+
+    button.title = [
+      "Repeat off",
+      "Repeat all",
+      "Repeat one"
+    ][state.repeatMode];
   }
 
   function updatePlayer() {
     const track = state.currentTrack;
 
+    const mini = $("miniPlayer");
+
     if (!track) {
-      $("miniPlayer").classList.remove("visible");
-      $("miniToggle").innerHTML = svgIcon("play", 18);
-      $("fullToggle").innerHTML = svgIcon("play", 26);
+      mini.classList.remove("visible");
+
+      $("miniToggle").innerHTML = icon("play", 18);
+      $("fullToggle").innerHTML = icon("play", 24);
+
+      $("miniTitle").textContent = "Nothing playing";
+      $("miniArtist").textContent = "Choose a song";
+
+      $("elapsed").textContent = "0:00";
+      $("remaining").textContent = "--:--";
+      $("miniProgress").style.width = "0%";
+      $("seek").value = "0";
+
       return;
     }
 
-    $("miniPlayer").classList.add("visible");
+    mini.classList.add("visible");
 
     $("miniCover").src = track.thumbnail || "";
-    $("miniTitle").textContent = track.title || "Unknown track";
+    $("miniTitle").textContent = track.title || "Unknown title";
     $("miniArtist").textContent = track.artist || "Unknown artist";
 
-    $("miniToggle").innerHTML =
-      audio.paused ? svgIcon("play", 18) : svgIcon("pause", 18);
-
-    $("fullToggle").innerHTML =
-      audio.paused ? svgIcon("play", 26) : svgIcon("pause", 26);
-
     $("fullCover").src = track.thumbnail || "";
-    $("fullTitle").textContent = track.title || "Unknown track";
+    $("fullTitle").textContent = track.title || "Unknown title";
     $("fullArtist").textContent = track.artist || "Unknown artist";
-    const likeButton = document.querySelector('[data-action="like-current"]');
+
+    $("miniToggle").innerHTML = audio.paused
+      ? icon("play", 18)
+      : icon("pause", 18);
+
+    $("fullToggle").innerHTML = audio.paused
+      ? icon("play", 24)
+      : icon("pause", 24);
+
+    const likeButton = document.querySelector(
+      '[data-action="like-current"]'
+    );
+
     if (likeButton) {
       const liked = isTrackLiked(track.id);
-      likeButton.innerHTML = svgIcon(liked ? "heartFill" : "heart", 20);
-      likeButton.setAttribute("aria-pressed", liked ? "true" : "false");
-      likeButton.setAttribute("aria-label", liked ? "Unlike current track" : "Like current track");
+
+      likeButton.innerHTML = icon(
+        liked ? "heartFill" : "heart",
+        19
+      );
+
+      likeButton.setAttribute(
+        "aria-pressed",
+        liked ? "true" : "false"
+      );
     }
+
+    const duration = getTrackDuration(track);
+    const current = Number(audio.currentTime) || 0;
+
+    $("elapsed").textContent = formatTime(current);
+
+    $("remaining").textContent = duration > 0
+      ? `-${formatTime(Math.max(0, duration - current))}`
+      : "--:--";
   }
 
-  function waitForMetadata() {
-    if (audio.readyState >= 1) {
-      return Promise.resolve();
-    }
-
-    return new Promise((resolve, reject) => {
-      let timer;
-
-      const cleanup = () => {
-        clearTimeout(timer);
-        audio.removeEventListener("loadedmetadata", onLoaded);
-        audio.removeEventListener("error", onError);
-      };
-
-      const onLoaded = () => {
-        cleanup();
-        resolve();
-      };
-
-      const onError = () => {
-        cleanup();
-        reject(new Error("Audio metadata could not load."));
-      };
-
-      audio.addEventListener("loadedmetadata", onLoaded, { once: true });
-      audio.addEventListener("error", onError, { once: true });
-
-      timer = setTimeout(() => {
-        cleanup();
-        reject(new Error("Audio source took too long to load."));
-      }, 15000);
-    });
-  }
-
-  async function playTrack(track, list = null, index = 0, resumeAt = 0) {
+  function updateProgress() {
+    const track = state.currentTrack;
     if (!track) return;
 
+    const duration = getTrackDuration(track);
+    const current = Number(audio.currentTime) || 0;
+
+    const progress = duration > 0
+      ? Math.min(1, Math.max(0, current / duration))
+      : 0;
+
+    $("miniProgress").style.width =
+      `${progress * 100}%`;
+
+    $("seek").value = String(
+      Math.round(progress * 1000)
+    );
+
+    $("elapsed").textContent = formatTime(current);
+
+    $("remaining").textContent = duration > 0
+      ? `-${formatTime(Math.max(0, duration - current))}`
+      : "--:--";
+  }
+
+  async function recordListening(track) {
+    if (!track?.id) return;
+
+    const id = String(track.id);
+    const now = Date.now();
+
+    if (
+      state.lastHistoryTrackId === id &&
+      now - state.lastHistoryAt < 30000
+    ) {
+      return;
+    }
+
+    state.lastHistoryTrackId = id;
+    state.lastHistoryAt = now;
+
+    try {
+      await api(
+        "/api/listening/history",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            id: track.id,
+            title: track.title || "Unknown title",
+            artist: track.artist || "Unknown artist",
+            duration_sec: Number(track.duration_sec || 0),
+            thumbnail: track.thumbnail || null
+          })
+        }
+      );
+    } catch (error) {
+      console.warn(
+        "Could not save listening history:",
+        error.message
+      );
+    }
+  }
+
+  async function playTrack(
+    track,
+    list = null,
+    index = 0,
+    resumeAt = 0
+  ) {
+    if (!track?.id) return;
+
     const requestId = ++state.playbackRequest;
-    const nextQueue = Array.isArray(list) ? list.slice() : [track];
+
+    const nextQueue = Array.isArray(list)
+      ? list.slice()
+      : [track];
 
     const safeIndex = Math.max(
       0,
@@ -2247,42 +3844,74 @@
     state.queue = nextQueue;
     state.queueIndex = safeIndex;
     state.currentTrack = { ...track };
+    state.playbackLoading = true;
 
+    resetShuffleBag();
+
+    // Stop and detach the previous source immediately.
+    // Old asynchronous requests must never pause the new player.
     audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+
     updatePlayer();
 
     try {
-      const token = await api("/api/stream-token", {
-        method: "POST",
-        body: JSON.stringify({ video_id: track.id })
-      });
+      const token = await api(
+        "/api/stream-token",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            video_id: track.id
+          })
+        }
+      );
 
-      if (requestId !== state.playbackRequest) return;
+      if (requestId !== state.playbackRequest) {
+        return;
+      }
+
+      if (
+        typeof token.stream_url !== "string" ||
+        !token.stream_url
+      ) {
+        throw new Error(
+          "Audio server returned an invalid stream URL."
+        );
+      }
 
       audio.src = token.stream_url;
       audio.load();
 
       if (resumeAt > 0) {
-        await waitForMetadata();
+        await waitForMetadata(requestId);
 
-        if (requestId !== state.playbackRequest) return;
+        if (requestId !== state.playbackRequest) {
+          return;
+        }
 
         const duration = Number(audio.duration);
 
         audio.currentTime =
           Number.isFinite(duration) && duration > 0
-            ? Math.min(resumeAt, Math.max(0, duration - .25))
+            ? Math.min(
+                resumeAt,
+                Math.max(0, duration - .25)
+              )
             : resumeAt;
       }
 
-      if (requestId !== state.playbackRequest) return;
+      if (requestId !== state.playbackRequest) {
+        return;
+      }
 
       await audio.play();
 
       if (requestId !== state.playbackRequest) {
-        audio.pause();
         return;
       }
+
+      state.playbackLoading = false;
 
       state.currentTrack = {
         ...track,
@@ -2294,52 +3923,168 @@
       updatePlayer();
       setMediaSession();
 
-    } catch (error) {
-      if (requestId !== state.playbackRequest) return;
-      if (error?.name === "AbortError") return;
+      await recordListening(state.currentTrack);
 
-      console.error("Taalune playback failed:", error);
-      showToast(error.message || "Unable to start this song.");
+    } catch (error) {
+      if (requestId !== state.playbackRequest) {
+        return;
+      }
+
+      state.playbackLoading = false;
+
+      if (error?.name === "AbortError") {
+        return;
+      }
+
+      console.error(
+        "Taalune playback failed:",
+        error
+      );
+
+      showToast(
+        error.message || "Unable to start this song."
+      );
+
       updatePlayer();
     }
   }
 
+  function waitForMetadata(requestId) {
+    if (requestId !== state.playbackRequest) {
+      return Promise.reject(
+        new DOMException(
+          "Playback request replaced",
+          "AbortError"
+        )
+      );
+    }
+
+    if (audio.readyState >= 1) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+      let timer;
+
+      const cleanup = () => {
+        clearTimeout(timer);
+
+        audio.removeEventListener(
+          "loadedmetadata",
+          onLoaded
+        );
+
+        audio.removeEventListener(
+          "error",
+          onError
+        );
+      };
+
+      const onLoaded = () => {
+        cleanup();
+
+        if (requestId !== state.playbackRequest) {
+          reject(
+            new DOMException(
+              "Playback request replaced",
+              "AbortError"
+            )
+          );
+          return;
+        }
+
+        resolve();
+      };
+
+      const onError = () => {
+        cleanup();
+
+        reject(
+          new Error("Audio metadata could not load.")
+        );
+      };
+
+      audio.addEventListener(
+        "loadedmetadata",
+        onLoaded
+      );
+
+      audio.addEventListener(
+        "error",
+        onError
+      );
+
+      timer = setTimeout(() => {
+        cleanup();
+
+        reject(
+          new Error("Audio source took too long to load.")
+        );
+      }, 12000);
+    });
+  }
+
   function setMediaSession() {
-    if (!("mediaSession" in navigator) || !state.currentTrack) {
+    if (
+      !("mediaSession" in navigator) ||
+      !state.currentTrack
+    ) {
       return;
     }
 
     const track = state.currentTrack;
 
     try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: track.title || "Unknown track",
-        artist: track.artist || "Unknown artist",
-        album: "Taalune",
-        artwork: track.thumbnail
-          ? [{
-              src: track.thumbnail,
-              sizes: "512x512",
-              type: "image/jpeg"
-            }]
-          : []
-      });
+      if ("MediaMetadata" in window) {
+        navigator.mediaSession.metadata =
+          new MediaMetadata({
+            title: track.title || "Unknown track",
+            artist: track.artist || "Unknown artist",
+            album: "Taalune",
 
-      navigator.mediaSession.setActionHandler("play", togglePlay);
+            artwork: track.thumbnail
+              ? [{
+                  src: track.thumbnail,
+                  sizes: "512x512",
+                  type: "image/jpeg"
+                }]
+              : []
+          });
+      }
 
-      navigator.mediaSession.setActionHandler("pause", () => {
-        audio.pause();
-        updatePlayer();
-      });
+      navigator.mediaSession.setActionHandler(
+        "play",
+        togglePlay
+      );
 
-      navigator.mediaSession.setActionHandler("nexttrack", nextTrack);
-      navigator.mediaSession.setActionHandler("previoustrack", previousTrack);
+      navigator.mediaSession.setActionHandler(
+        "pause",
+        () => {
+          audio.pause();
+          updatePlayer();
+        }
+      );
+
+      navigator.mediaSession.setActionHandler(
+        "nexttrack",
+        nextTrack
+      );
+
+      navigator.mediaSession.setActionHandler(
+        "previoustrack",
+        previousTrack
+      );
 
     } catch (_) {}
   }
 
   async function togglePlay() {
-    if (!state.currentTrack) return;
+    if (
+      !state.currentTrack ||
+      state.playbackLoading
+    ) {
+      return;
+    }
 
     if (!audio.paused) {
       audio.pause();
@@ -2361,14 +4106,21 @@
     try {
       await audio.play();
 
-      if (requestId !== state.playbackRequest) return;
+      if (requestId !== state.playbackRequest) {
+        return;
+      }
 
       updatePlayer();
       setMediaSession();
 
     } catch (error) {
-      if (requestId !== state.playbackRequest) return;
-      if (error?.name === "AbortError") return;
+      if (requestId !== state.playbackRequest) {
+        return;
+      }
+
+      if (error?.name === "AbortError") {
+        return;
+      }
 
       const position = Number(audio.currentTime) || 0;
 
@@ -2381,48 +4133,50 @@
     }
   }
 
+  function clearPersonalPlayer() {
+    ++state.playbackRequest;
+
+    state.playbackLoading = false;
+
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+
+    state.currentTrack = null;
+    state.queue = [];
+    state.queueIndex = -1;
+    state.shuffleBag = [];
+
+    updatePlayer();
+  }
+
   async function nextTrack() {
     if (!state.queue.length) return;
 
+    let nextIndex = -1;
+
     if (state.shuffle && state.queue.length > 1) {
-      let nextIndex = state.queueIndex;
-
-      while (nextIndex === state.queueIndex) {
-        nextIndex = Math.floor(Math.random() * state.queue.length);
-      }
-
-      state.queueIndex = nextIndex;
+      nextIndex = pickShuffleIndex();
 
     } else if (state.queueIndex + 1 < state.queue.length) {
-      state.queueIndex++;
+      nextIndex = state.queueIndex + 1;
 
-    } else if (state.repeat && state.currentTrack) {
-      await playTrack(
-        state.currentTrack,
-        state.queue,
-        state.queueIndex
-      );
-      return;
+    } else if (state.repeatMode === 1) {
+      nextIndex = 0;
+    }
 
-    } else {
-      state.playbackRequest++;
-
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
-
-      state.currentTrack = null;
-      state.queue = [];
-      state.queueIndex = -1;
-
-      updatePlayer();
+    if (
+      nextIndex < 0 ||
+      nextIndex >= state.queue.length
+    ) {
+      clearPersonalPlayer();
       return;
     }
 
     await playTrack(
-      state.queue[state.queueIndex],
+      state.queue[nextIndex],
       state.queue,
-      state.queueIndex
+      nextIndex
     );
   }
 
@@ -2433,103 +4187,216 @@
     }
 
     if (state.queueIndex > 0) {
-      state.queueIndex--;
+      const previous = state.queueIndex - 1;
 
       await playTrack(
-        state.queue[state.queueIndex],
+        state.queue[previous],
         state.queue,
-        state.queueIndex
+        previous
+      );
+
+    } else if (state.repeatMode === 1 && state.queue.length) {
+      const previous = state.queue.length - 1;
+
+      await playTrack(
+        state.queue[previous],
+        state.queue,
+        previous
       );
     }
   }
 
-  async function reorderPlaylist(trackId, direction) {
-    const playlist = state.activePlaylist;
+  function openQueue() {
+    $("queueCaption").textContent = state.currentTrack
+      ? `Playing ${state.currentTrack.title}`
+      : "Nothing playing";
 
-    if (!playlist) {
-      throw new Error("Playlist is not open.");
-    }
+    const target = $("queueItems");
 
-    const tracks = playlist.tracks.slice();
+    target.innerHTML = state.queue.length
+      ? state.queue.map((track, index) => `
+          <div class="track-row ${
+            index === state.queueIndex ? "queue-current" : ""
+          }">
+            ${image(track.thumbnail, "track-cover")}
 
-    const from = tracks.findIndex(
-      track => String(track.id) === String(trackId)
-    );
+            <div class="track-copy">
+              <div class="track-title">
+                ${index === state.queueIndex ? "▶ " : ""}
+                ${esc(track.title)}
+              </div>
 
-    const to = from + direction;
+              <div class="track-sub">
+                ${esc(track.artist || "Unknown artist")}
+                · ${formatTime(track.duration_sec)}
+              </div>
+            </div>
 
-    if (from < 0 || to < 0 || to >= tracks.length) {
+            <button
+              class="track-action"
+              data-action="queue-play"
+              data-index="${index}"
+              aria-label="Play song"
+            >
+              ${icon("play", 16)}
+            </button>
+
+            <button
+              class="track-action"
+              data-action="queue-remove"
+              data-index="${index}"
+              aria-label="Remove song"
+            >
+              ${icon("trash", 16)}
+            </button>
+          </div>
+        `).join("")
+      : '<div class="empty">Your personal queue is empty.</div>';
+
+    $("queueOverlay").classList.add("open");
+  }
+
+  async function removeQueueItem(index) {
+    if (
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= state.queue.length
+    ) {
       return;
     }
 
-    [tracks[from], tracks[to]] = [tracks[to], tracks[from]];
-
-    const result = await api(
-      `/api/playlists/${encodeURIComponent(playlist.id)}/tracks/order`,
-      {
-        method: "PUT",
-        body: JSON.stringify({
-          track_ids: tracks.map(track => track.id),
-          version: playlist.version
-        })
+    if (index === state.queueIndex) {
+      if (state.queue.length === 1) {
+        clearPersonalPlayer();
+        openQueue();
+        return;
       }
+
+      const nextIndex =
+        index < state.queue.length - 1
+          ? index + 1
+          : index - 1;
+
+      const next = state.queue[nextIndex];
+
+      state.queue.splice(index, 1);
+
+      const adjustedIndex =
+        nextIndex > index
+          ? nextIndex - 1
+          : nextIndex;
+
+      await playTrack(
+        next,
+        state.queue,
+        adjustedIndex
+      );
+
+    } else {
+      state.queue.splice(index, 1);
+
+      if (index < state.queueIndex) {
+        state.queueIndex--;
+      }
+
+      resetShuffleBag();
+    }
+
+    openQueue();
+  }
+
+  function setRepeatMode() {
+    state.repeatMode = (state.repeatMode + 1) % 3;
+
+    updateRepeatButton();
+
+    showToast([
+      "Repeat off",
+      "Repeat all",
+      "Repeat one"
+    ][state.repeatMode]);
+  }
+
+  function setShuffle() {
+    state.shuffle = !state.shuffle;
+
+    $("shuffleButton").classList.toggle(
+      "active",
+      state.shuffle
     );
 
-    state.activePlaylist = result.playlist;
-    renderPlaylist();
-    showToast("Playlist order updated");
+    if (state.shuffle) {
+      resetShuffleBag();
+    }
+
+    showToast(
+      state.shuffle
+        ? "Shuffle enabled"
+        : "Shuffle disabled"
+    );
   }
+
+  // -------------------------------------------------------
+  // UI actions
+  // -------------------------------------------------------
 
   document.addEventListener("click", async event => {
     const pageButton = event.target.closest("[data-page]");
 
     if (pageButton) {
-      go(pageButton.dataset.page);
+      const page = pageButton.dataset.page;
+
+      if (page) {
+        setPage(page);
+      }
+
       return;
     }
 
-    const homeQueryButton = event.target.closest("[data-home-query]");
+    const searchModeButton =
+      event.target.closest("[data-search-mode]");
 
-    if (homeQueryButton) {
-      await loadHomeTracks(
-        homeQueryButton.dataset.homeQuery,
-        true
+    if (searchModeButton) {
+      setSearchMode(
+        searchModeButton.dataset.searchMode
       );
       return;
     }
 
-    const modeButton = event.target.closest("[data-search-mode]");
+    const libraryButton =
+      event.target.closest("[data-library-scope]");
 
-    if (modeButton) {
-      setSearchMode(modeButton.dataset.searchMode);
+    if (libraryButton) {
+      await showLibraryScope(
+        libraryButton.dataset.libraryScope
+      );
       return;
     }
 
-    const scopeButton = event.target.closest("[data-library-scope]");
+    const actionButton =
+      event.target.closest("[data-action]");
 
-    if (scopeButton) {
-      await showLibraryScope(scopeButton.dataset.libraryScope);
-      return;
-    }
+    if (!actionButton) return;
 
-    const button = event.target.closest("[data-action]");
-    if (!button) return;
-
-    const action = button.dataset.action;
-    const id = button.dataset.id;
+    const action = actionButton.dataset.action;
+    const id = actionButton.dataset.id;
 
     try {
       if (action === "notifications") {
-        go("notifications");
-
-      } else if (action === "profile") {
-        go("profile");
+        setPage("notifications");
 
       } else if (action === "create-playlist") {
         createPlaylistSheet();
 
       } else if (action === "refresh-home") {
-        await loadHomeTracks(state.homeQuery, true);
+        state.homeLoadedAt = 0;
+        state.homeFeedLoadedAt = 0;
+
+        await loadHome(true);
+
+      } else if (action === "open-discover") {
+        setPage("library");
+        await showLibraryScope("discover");
 
       } else if (action === "close-sheet") {
         closeSheet();
@@ -2541,186 +4408,148 @@
         await openPlaylist(id);
 
       } else if (action === "open-person") {
-        await openPerson(button.dataset.handle);
+        await openPerson(
+          actionButton.dataset.handle
+        );
 
       } else if (action === "check-group") {
         await connectGroup();
+
+      } else if (action === "disconnect-group") {
+        disconnectGroup();
 
       } else if (action === "refresh-group") {
         await refreshGroupStatus();
         showToast("Group status updated");
 
       } else if (action === "group-control") {
-        await groupControl(button.dataset.command);
+        await groupControl(
+          actionButton.dataset.command
+        );
 
-      } else if (action === "group-track") {
-        const track = [
-          ...state.searchResults,
-          ...state.homeTracks,
-          ...(state.activePlaylist?.tracks || []),
-          ...state.liked
-        ].find(item => String(item.id) === String(id));
+      } else if (
+        action === "group-track" ||
+        action === "group-play-track"
+      ) {
+        const track = findTrack(id);
 
         if (!track) {
-          throw new Error("Song details are unavailable. Search again.");
+          throw new Error(
+            "Song details are unavailable. Search again."
+          );
         }
 
-        await groupControl("queue_track", {
-          track: {
-            id: track.id,
-            title: track.title,
-            artist: track.artist || "Unknown artist",
-            duration_sec: Number(track.duration_sec || 0),
-            thumbnail: track.thumbnail || null
-          }
-        });
+        await groupTrack(
+          track,
+          action === "group-play-track"
+        );
 
       } else if (action === "group-play-playlist") {
         if (!state.activePlaylist) {
           throw new Error("Open a playlist first.");
         }
 
-        await groupControl("play_playlist", {
-          playlist_id: state.activePlaylist.id
-        });
+        await groupControl(
+          "play_playlist",
+          {
+            playlist_id: state.activePlaylist.id
+          }
+        );
 
       } else if (action === "group-queue-playlist") {
         if (!state.activePlaylist) {
           throw new Error("Open a playlist first.");
         }
 
-        await groupControl("queue_playlist", {
-          playlist_id: state.activePlaylist.id
-        });
+        await groupControl(
+          "queue_playlist",
+          {
+            playlist_id: state.activePlaylist.id
+          }
+        );
 
       } else if (action === "play-track") {
-        const list = state.page === "playlist"
-          ? (state.activePlaylist?.tracks || [])
-          : state.page === "library" && state.libraryScope === "liked"
-            ? state.liked
-            : state.page === "home"
-              ? state.homeTracks
-              : state.searchResults;
-
-        const track = list.find(
-          item => String(item.id) === String(id)
-        ) || [
-          ...state.searchResults,
-          ...state.homeTracks,
-          ...state.liked,
-          ...(state.activePlaylist?.tracks || [])
-        ].find(item => String(item.id) === String(id));
-
-        if (track) {
-          const playbackList = list.some(
-            item => String(item.id) === String(track.id)
-          ) ? list : [track];
-
-          const index = playbackList.findIndex(
-            item => String(item.id) === String(track.id)
-          );
-
-          await playTrack(
-            track,
-            playbackList,
-            Math.max(0, index)
-          );
-        }
-
-      } else if (action === "add-track") {
-        const track = [
-          ...state.searchResults,
-          ...state.homeTracks,
-          ...state.liked,
-          ...(state.activePlaylist?.tracks || [])
-        ].find(item => String(item.id) === String(id));
+        const track = findTrack(id);
 
         if (!track) {
-          throw new Error("Song details are unavailable. Search again.");
+          throw new Error("Song details are unavailable.");
+        }
+
+        let list = [track];
+
+        if (state.page === "playlist") {
+          list = state.activePlaylist?.tracks || [track];
+
+        } else if (
+          state.page === "library" &&
+          state.libraryScope === "liked"
+        ) {
+          list = state.liked;
+
+        } else if (state.page === "home") {
+          list = state.homeTracks;
+
+        } else if (
+          state.page === "search" &&
+          state.searchMode === "music"
+        ) {
+          list = state.searchResults;
+        }
+
+        const index = Math.max(
+          0,
+          list.findIndex(
+            item => String(item.id) === String(track.id)
+          )
+        );
+
+        await playTrack(
+          track,
+          list,
+          index
+        );
+
+      } else if (action === "add-track") {
+        const track = findTrack(id);
+
+        if (!track) {
+          throw new Error(
+            "Song details are unavailable. Search again."
+          );
         }
 
         if (state.addTargetPlaylist) {
           const playlistId = state.addTargetPlaylist;
 
-          await api(
-            `/api/playlists/${encodeURIComponent(playlistId)}/tracks`,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                id: track.id,
-                title: track.title,
-                artist: track.artist || "Unknown artist",
-                duration_sec: Number(track.duration_sec || 0),
-                thumbnail: track.thumbnail || null
-              })
-            }
+          await addTrackToPlaylist(
+            track,
+            playlistId
           );
 
           state.addTargetPlaylist = null;
 
-          showToast("Song added to playlist");
-
-          if (state.activePlaylist?.id === playlistId) {
-            await reloadActivePlaylist();
-          }
-
         } else {
-          const data = await api(
-            "/api/playlists?scope=mine&limit=50"
-          );
-
-          state.playlists = data.results || [];
+          await loadPersonalPlaylists();
           addTrackSheet(track);
         }
 
+      } else if (action === "confirm-add-track") {
+        await confirmAddTrack();
+
       } else if (action === "like-track") {
-        const track = [ ...state.searchResults, ...state.homeTracks, ...state.liked, ...(state.activePlaylist?.tracks || []) ].find(item => String(item.id) === String(id)) || state.currentTrack;
+        const track = findTrack(id);
+
+        if (!track) {
+          throw new Error("Song details are unavailable.");
+        }
+
         await toggleTrackLike(track);
 
       } else if (action === "playlist-follow") {
-        const data = await api(
-          `/api/playlists/${encodeURIComponent(id)}`
-        );
-
-        const playlist = data.playlist;
-        const method = playlist.followed ? "DELETE" : "POST";
-
-        await api(
-          `/api/playlists/${encodeURIComponent(id)}/follow`,
-          { method }
-        );
-
-        showToast(
-          playlist.followed
-            ? "Playlist unfollowed"
-            : "Playlist followed"
-        );
-
-        if (state.activePlaylist?.id === id) {
-          await reloadActivePlaylist();
-
-        } else if (state.page === "home") {
-          await loadHome();
-
-        } else if (state.page === "library") {
-          await showLibraryScope(state.libraryScope);
-        }
+        await togglePlaylistFollow(id);
 
       } else if (action === "like-playlist") {
-        const playlist = state.activePlaylist;
-
-        if (!playlist) {
-          throw new Error("Playlist is not open.");
-        }
-
-        await api(
-          `/api/playlists/${encodeURIComponent(playlist.id)}/like`,
-          {
-            method: playlist.liked ? "DELETE" : "POST"
-          }
-        );
-
-        await reloadActivePlaylist();
+        await togglePlaylistLike();
 
       } else if (action === "play-playlist") {
         const playlist = state.activePlaylist;
@@ -2739,314 +4568,111 @@
         editPlaylistSheet();
 
       } else if (action === "save-playlist-edit") {
-        const playlist = state.activePlaylist;
-
-        const body = {
-          name: $("editPlaylistName").value,
-          description: $("editPlaylistDescription").value,
-          cover_url: $("editPlaylistCover").value || null,
-          icon: $("editPlaylistIcon").value || "music"
-        };
-
-        const visibility = $("editPlaylistVisibility");
-
-        if (visibility) {
-          body.visibility = visibility.value;
-        }
-
-        const result = await api(
-          `/api/playlists/${encodeURIComponent(playlist.id)}`,
-          {
-            method: "PATCH",
-            body: JSON.stringify(body)
-          }
-        );
-
-        state.activePlaylist = result.playlist;
-
-        closeSheet();
-        renderPlaylist();
-        showToast("Playlist updated");
+        await savePlaylistEdit();
 
       } else if (action === "save-playlist") {
-        const body = {
-          name: $("newPlaylistName").value,
-          description: $("newPlaylistDescription").value,
-          visibility: $("newPlaylistVisibility").value,
-          cover_url: $("newPlaylistCover").value || null,
-          icon: $("newPlaylistIcon").value || "music"
-        };
-
-        const result = await api("/api/playlists", {
-          method: "POST",
-          body: JSON.stringify(body)
-        });
-
-        closeSheet();
-        showToast("Playlist created");
-
-        await openPlaylist(result.playlist.id);
-
-      } else if (action === "confirm-add-track") {
-        const playlistId = $("targetPlaylist").value;
-
-        if (!playlistId || !state.modalTrack) {
-          throw new Error("Choose a playlist first.");
-        }
-
-        await api(
-          `/api/playlists/${encodeURIComponent(playlistId)}/tracks`,
-          {
-            method: "POST",
-            body: JSON.stringify(state.modalTrack)
-          }
-        );
-
-        closeSheet();
-        showToast("Song added to playlist");
-
-        if (state.activePlaylist?.id === playlistId) {
-          await reloadActivePlaylist();
-        }
+        await savePlaylist();
 
       } else if (action === "add-from-search") {
-        state.addTargetPlaylist = state.activePlaylist?.id || null;
+        if (!state.activePlaylist) return;
+
+        state.addTargetPlaylist =
+          state.activePlaylist.id;
+
         state.searchMode = "music";
+        state.searchQuery = "";
 
-        go("search");
+        setPage("search");
+        renderSearchShell();
 
-        showToast("Search for a song, then tap Add to playlist.");
+        showToast(
+          "Search for songs, then tap Add."
+        );
 
       } else if (action === "upload-cover") {
         await uploadCover(
-          button.dataset.file,
-          button.dataset.target,
-          button
+          actionButton.dataset.file,
+          actionButton
         );
 
       } else if (action === "invite-collaborator") {
         await inviteSheet();
 
-      } else if (action === "delete-playlist") {
-        if (!state.activePlaylist) return;
-
-        if (!confirm("Delete this playlist? It will be hidden from everyone.")) {
-          return;
-        }
-
-        await api(
-          `/api/playlists/${encodeURIComponent(state.activePlaylist.id)}`,
-          { method: "DELETE" }
-        );
-
-        state.activePlaylist = null;
-
-        showToast("Playlist deleted");
-        go("library");
-
       } else if (action === "select-invitee") {
         state.selectedInvite = Number(id);
 
-        const send = $("sendInviteButton");
+        document.querySelectorAll(
+          '[data-action="select-invitee"]'
+        ).forEach(button => {
+          button.classList.toggle(
+            "queue-current",
+            Number(button.dataset.id) ===
+              state.selectedInvite
+          );
+        });
 
-        if (send) {
-          send.disabled = false;
-        }
-
-        await searchInvitePeople();
+        $("sendInviteButton").disabled =
+          !state.selectedInvite;
 
       } else if (action === "send-invite") {
-        if (!state.selectedInvite) {
-          throw new Error("Choose a person first.");
-        }
+        await sendInvitation();
 
-        const playlistId = $("invitePlaylist").value;
-
-        await api(
-          `/api/playlists/${encodeURIComponent(playlistId)}/invitations`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              user_id: state.selectedInvite,
-              role: $("inviteRole").value
-            })
-          }
-        );
-
-        closeSheet();
-        showToast("Collaboration invitation sent");
-
-      } else if (action === "invitation") {
-        await api(
-          `/api/invitations/${encodeURIComponent(id)}/respond`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              action: button.dataset.choice
-            })
-          }
-        );
-
-        showToast(
-          button.dataset.choice === "accept"
-            ? "Invitation accepted"
-            : "Invitation declined"
-        );
-
-        await loadNotifications();
-
-      } else if (action === "follow-response") {
-        await api(
-          `/api/people/${encodeURIComponent(id)}/follow-response`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              action: button.dataset.choice
-            })
-          }
-        );
-
-        showToast("Follow request updated");
-        await loadNotifications();
+      } else if (action === "delete-playlist") {
+        await deletePlaylist();
 
       } else if (action === "follow-person") {
-        const previousState = button.dataset.state || "";
-        if (previousState === "pending" || previousState === "accepted") {
-          await api("/api/people/" + encodeURIComponent(id) + "/follow", { method: "DELETE" });
-          button.dataset.state = "";
-          button.textContent = "Follow";
-          state.searchResults = state.searchResults.map(person => String(person.user_id) === String(id) ? { ...person, follow_state: null } : person);
-          if (state.activePerson && state.activePerson.profile && String(state.activePerson.profile.user_id) === String(id)) state.activePerson.profile.follow_state = null;
-          showToast(previousState === "pending" ? "Follow request cancelled" : "Unfollowed");
-        } else {
-          const result = await api("/api/people/" + encodeURIComponent(id) + "/follow", { method: "POST" });
-          button.dataset.state = result.status || "";
-          button.textContent = result.status === "pending" ? "Requested" : "Following";
-          state.searchResults = state.searchResults.map(person => String(person.user_id) === String(id) ? { ...person, follow_state: result.status } : person);
-          if (state.activePerson && state.activePerson.profile && String(state.activePerson.profile.user_id) === String(id)) state.activePerson.profile.follow_state = result.status;
-          showToast(result.status === "pending" ? "Follow request sent" : "Following");
-        }
+        await followPerson(actionButton);
+
+      } else if (action === "follow-response") {
+        await respondFollow(actionButton);
+
+      } else if (action === "invitation") {
+        await respondInvitation(actionButton);
 
       } else if (action === "read-notification") {
-        await api(
-          `/api/notifications/${encodeURIComponent(id)}/read`,
-          { method: "POST" }
-        );
-
-        button.innerHTML = svgIcon("check", 16);
-        button.closest(".notification")?.classList.remove("unread");
+        await markNotificationRead(actionButton);
 
       } else if (action === "edit-profile") {
         editProfileSheet();
 
       } else if (action === "save-profile") {
-        const body = {
-          handle: $("profileHandle").value,
-          display_name: $("profileName").value,
-          bio: $("profileBio").value,
-          avatar_url: $("profileAvatar").value || null,
-          visibility: $("profileVisibility").value,
-          discoverable: $("profileDiscoverable").value === "true"
-        };
-
-        const result = await api("/api/profile", {
-          method: "PATCH",
-          body: JSON.stringify(body)
-        });
-
-        state.profile = result.profile;
-
-        setAvatar();
-        closeSheet();
-        renderProfile();
-
-        showToast("Profile updated");
+        await saveProfile();
 
       } else if (action === "toggle-profile-privacy") {
-        const visibility = state.profile.visibility === "public"
-          ? "private"
-          : "public";
-
-        const result = await api("/api/profile", {
-          method: "PATCH",
-          body: JSON.stringify({ visibility })
-        });
-
-        state.profile = result.profile;
-
-        renderProfile();
-        showToast("Profile privacy updated");
+        await toggleProfilePrivacy();
 
       } else if (action === "remove-track") {
-        const playlist = state.activePlaylist;
-
-        if (!playlist) {
-          throw new Error("Playlist is not open.");
-        }
+        if (!state.activePlaylist) return;
 
         if (!confirm("Remove this song from the playlist?")) {
           return;
         }
 
         await api(
-          `/api/playlists/${encodeURIComponent(playlist.id)}/tracks/${encodeURIComponent(id)}`,
+          `/api/playlists/${encodeURIComponent(state.activePlaylist.id)}/tracks/${encodeURIComponent(id)}`,
           { method: "DELETE" }
         );
 
         await reloadActivePlaylist();
-        showToast("Song removed from playlist");
 
-      } else if (
-        action === "move-track-up" ||
-        action === "move-track-down"
-      ) {
-        await reorderPlaylist(
-          id,
-          action === "move-track-up" ? -1 : 1
-        );
+        showToast("Song removed");
+
+      } else if (action === "move-track-up") {
+        await reorderPlaylist(id, -1);
+
+      } else if (action === "move-track-down") {
+        await reorderPlaylist(id, 1);
 
       } else if (action === "remove-collaborator") {
-        if (!state.activePlaylist) return;
-
-        if (!confirm("Remove this collaborator from the playlist?")) {
-          return;
-        }
-
-        await api(
-          `/api/playlists/${encodeURIComponent(state.activePlaylist.id)}/collaborators/${encodeURIComponent(id)}`,
-          { method: "DELETE" }
-        );
-
-        await reloadActivePlaylist();
-        showToast("Collaborator removed");
+        await removeCollaborator(id);
 
       } else if (action === "change-collaborator") {
-        if (!state.activePlaylist) return;
-
-        const role = prompt(
-          "New role: editor, contributor or viewer",
-          "editor"
-        );
-
-        if (!role) return;
-
-        if (!["editor", "contributor", "viewer"].includes(role)) {
-          throw new Error("Choose editor, contributor or viewer.");
-        }
-
-        await api(
-          `/api/playlists/${encodeURIComponent(state.activePlaylist.id)}/collaborators/${encodeURIComponent(id)}`,
-          {
-            method: "PATCH",
-            body: JSON.stringify({ role })
-          }
-        );
-
-        await reloadActivePlaylist();
-        showToast("Collaborator role updated");
+        await changeCollaboratorRole(id);
 
       } else if (action === "open-player") {
-        $("fullPlayer").classList.add("open");
+        if (state.currentTrack) {
+          $("fullPlayer").classList.add("open");
+        }
 
       } else if (action === "close-player") {
         $("fullPlayer").classList.remove("open");
@@ -3061,22 +4687,16 @@
         await previousTrack();
 
       } else if (action === "shuffle") {
-        state.shuffle = !state.shuffle;
-
-        button.classList.toggle("active", state.shuffle);
-        button.style.color = state.shuffle ? "var(--accent)" : "";
+        setShuffle();
 
       } else if (action === "repeat") {
-        state.repeat = !state.repeat;
-
-        button.classList.toggle("active", state.repeat);
-        button.style.color = state.repeat ? "var(--accent)" : "";
+        setRepeatMode();
 
       } else if (action === "queue") {
         openQueue();
 
       } else if (action === "queue-play") {
-        const index = Number(button.dataset.index);
+        const index = Number(actionButton.dataset.index);
 
         if (!state.queue[index]) return;
 
@@ -3089,90 +4709,46 @@
         $("queueOverlay").classList.remove("open");
 
       } else if (action === "queue-remove") {
-        const index = Number(button.dataset.index);
-
-        if (!Number.isInteger(index) || !state.queue[index]) {
-          return;
-        }
-
-        if (index === state.queueIndex) {
-          if (state.queue.length === 1) {
-            state.playbackRequest++;
-
-            audio.pause();
-            audio.removeAttribute("src");
-            audio.load();
-
-            state.queue = [];
-            state.queueIndex = -1;
-            state.currentTrack = null;
-
-            updatePlayer();
-
-          } else {
-            const nextIndex = index < state.queue.length - 1
-              ? index + 1
-              : index - 1;
-
-            const next = state.queue[nextIndex];
-
-            state.queue.splice(index, 1);
-
-            state.queueIndex =
-              nextIndex > index ? nextIndex - 1 : nextIndex;
-
-            await playTrack(
-              next,
-              state.queue,
-              state.queueIndex
-            );
-          }
-
-        } else {
-          state.queue.splice(index, 1);
-
-          if (index < state.queueIndex) {
-            state.queueIndex--;
-          }
-        }
-
-        openQueue();
+        await removeQueueItem(
+          Number(actionButton.dataset.index)
+        );
 
       } else if (action === "like-current") {
-        if (!state.currentTrack) return;
-        await toggleTrackLike(state.currentTrack);
+        if (state.currentTrack) {
+          await toggleTrackLike(state.currentTrack);
+        }
       }
 
     } catch (error) {
-      showToast(error.message || "Something went wrong");
+      showToast(
+        error.message || "Something went wrong."
+      );
     }
   });
 
-  document.addEventListener("change", event => {
-    const input = event.target;
-    const config = UPLOAD_FIELDS[input && input.id];
-    if (!config || input.type !== "file") return;
-    const file = input.files && input.files[0];
-    if (!file) { setUploadPreview(config, "", false); return; }
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      input.value = ""; setUploadPreview(config, "", false); showToast("Use a JPG, PNG or WebP image."); return;
-    }
-    if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
-      input.value = ""; setUploadPreview(config, "", false); showToast(file.size > 5 * 1024 * 1024 ? "Image must be 5 MB or smaller." : "The selected image is empty."); return;
-    }
-    setUploadPreview(config, URL.createObjectURL(file), true);
-    const progressWrap = $(config.progressWrap);
-    const progress = $(config.progress);
-    const status = $(config.status);
-    if (progressWrap) progressWrap.hidden = true;
-    if (progress) progress.value = 0;
-    if (status) status.textContent = "";
-  });
+  // -------------------------------------------------------
+  // Input events
+  // -------------------------------------------------------
 
   document.addEventListener("input", event => {
-    if (event.target.id === "searchInput") {
+    const target = event.target;
+
+    if (target.id === "searchInput") {
       clearTimeout(searchTimer);
-      searchTimer = setTimeout(runSearch, 320);
+
+      searchTimer = setTimeout(
+        runSearch,
+        320
+      );
+    }
+
+    if (target.id === "inviteSearch") {
+      clearTimeout(searchTimer);
+
+      searchTimer = setTimeout(
+        searchInvitePeople,
+        280
+      );
     }
   });
 
@@ -3182,23 +4758,113 @@
       event.key === "Enter"
     ) {
       event.preventDefault();
+
+      clearTimeout(searchTimer);
       runSearch();
     }
+
+    if (
+      event.target.id === "groupIdInput" &&
+      event.key === "Enter"
+    ) {
+      event.preventDefault();
+      connectGroup();
+    }
   });
+
+  document.addEventListener("change", event => {
+    const input = event.target;
+
+    const config = UPLOAD_FIELDS[input?.id];
+
+    if (
+      !config ||
+      input.type !== "file"
+    ) {
+      return;
+    }
+
+    const file = input.files?.[0];
+
+    if (!file) {
+      setUploadPreview(config, "", false);
+      return;
+    }
+
+    if (
+      !["image/jpeg", "image/png", "image/webp"].includes(file.type)
+    ) {
+      input.value = "";
+
+      setUploadPreview(config, "", false);
+
+      showToast("Use a JPG, PNG or WebP image.");
+      return;
+    }
+
+    if (
+      file.size <= 0 ||
+      file.size > 5 * 1024 * 1024
+    ) {
+      input.value = "";
+
+      setUploadPreview(config, "", false);
+
+      showToast(
+        file.size > 5 * 1024 * 1024
+          ? "Image must be 5 MB or smaller."
+          : "Selected image is empty."
+      );
+
+      return;
+    }
+
+    const oldUrl = previewObjectUrls.get(config.preview);
+
+    if (oldUrl) {
+      URL.revokeObjectURL(oldUrl);
+      previewObjectUrls.delete(config.preview);
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+
+    setUploadPreview(
+      config,
+      objectUrl,
+      true
+    );
+
+    const progressWrap = $(config.progressWrap);
+    const progress = $(config.progress);
+
+    if (progressWrap) progressWrap.hidden = true;
+    if (progress) progress.value = 0;
+
+    updateUploadStatus(config, "");
+  });
+
+  // -------------------------------------------------------
+  // Playlist drag-and-drop reorder
+  // -------------------------------------------------------
 
   document.addEventListener("dragstart", event => {
     const row = event.target.closest(
       ".track-row[draggable='true']"
     );
 
-    if (!row) return;
+    if (!row || state.page !== "playlist") return;
 
     state.dragId = row.dataset.trackId;
+
     row.classList.add("dragging");
 
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", state.dragId);
+
+      event.dataTransfer.setData(
+        "text/plain",
+        state.dragId
+      );
     }
   });
 
@@ -3210,11 +4876,14 @@
     if (!row || !state.dragId) return;
 
     event.preventDefault();
+
     row.classList.add("drag-over");
   });
 
   document.addEventListener("dragleave", event => {
-    event.target.closest(".track-row")?.classList.remove("drag-over");
+    event.target
+      .closest(".track-row")
+      ?.classList.remove("drag-over");
   });
 
   document.addEventListener("drop", async event => {
@@ -3222,7 +4891,11 @@
       ".track-row[draggable='true']"
     );
 
-    if (!row || !state.dragId || !state.activePlaylist) {
+    if (
+      !row ||
+      !state.dragId ||
+      !state.activePlaylist
+    ) {
       return;
     }
 
@@ -3248,6 +4921,7 @@
     }
 
     const [moved] = tracks.splice(from, 1);
+
     tracks.splice(to, 0, moved);
 
     try {
@@ -3263,91 +4937,169 @@
       );
 
       state.activePlaylist = result.playlist;
+
       renderPlaylist();
 
       showToast("Playlist order updated");
 
     } catch (error) {
       await reloadActivePlaylist();
+
       showToast(error.message);
 
     } finally {
       state.dragId = null;
+
+      document.querySelectorAll(
+        ".dragging,.drag-over"
+      ).forEach(element => {
+        element.classList.remove(
+          "dragging",
+          "drag-over"
+        );
+      });
     }
   });
 
   document.addEventListener("dragend", () => {
     state.dragId = null;
 
-    document.querySelectorAll(".dragging,.drag-over").forEach(element => {
-      element.classList.remove("dragging", "drag-over");
+    document.querySelectorAll(
+      ".dragging,.drag-over"
+    ).forEach(element => {
+      element.classList.remove(
+        "dragging",
+        "drag-over"
+      );
     });
   });
 
+  // -------------------------------------------------------
+  // Audio element events
+  // -------------------------------------------------------
+
   $("seek").addEventListener("input", () => {
+    const duration = Number(audio.duration);
+
     if (
-      Number.isFinite(audio.duration) &&
-      audio.duration > 0
+      Number.isFinite(duration) &&
+      duration > 0
     ) {
       audio.currentTime =
-        (Number($("seek").value) / 1000) * audio.duration;
+        (Number($("seek").value) / 1000) * duration;
     }
   });
 
-  audio.addEventListener("timeupdate", () => {
-    const duration = Number(audio.duration) || 0;
-    const current = Number(audio.currentTime) || 0;
-    const progress = duration > 0 ? current / duration : 0;
+  audio.addEventListener("timeupdate", updateProgress);
 
-    $("miniProgress").style.width = `${progress * 100}%`;
-    $("seek").value = String(Math.round(progress * 1000));
-
-    $("elapsed").textContent = shortTime(current);
-
-    $("remaining").textContent =
-      `-${shortTime(Math.max(0, duration - current))}`;
+  audio.addEventListener("loadedmetadata", () => {
+    updateProgress();
+    updatePlayer();
   });
 
-  audio.addEventListener("play", updatePlayer);
+  audio.addEventListener("play", () => {
+    state.playbackLoading = false;
+    updatePlayer();
+  });
+
   audio.addEventListener("pause", updatePlayer);
 
   audio.addEventListener("ended", async () => {
-    if (state.repeat && state.currentTrack) {
-      await playTrack(
-        state.currentTrack,
-        state.queue,
-        state.queueIndex
-      );
-    } else {
-      await nextTrack();
+    if (
+      state.repeatMode === 2 &&
+      state.currentTrack
+    ) {
+      audio.currentTime = 0;
+
+      try {
+        await audio.play();
+      } catch (error) {
+        showToast(error.message);
+      }
+
+      return;
     }
+
+    await nextTrack();
   });
 
   audio.addEventListener("error", () => {
-    if (state.currentTrack) {
-      showToast("This audio stream is unavailable. Try playing it again.");
+    if (
+      state.currentTrack &&
+      !state.playbackLoading &&
+      audio.currentSrc
+    ) {
+      showToast(
+        "This audio stream is unavailable. Try playing it again."
+      );
     }
   });
 
+  // -------------------------------------------------------
+  // Background group status refresh
+  // -------------------------------------------------------
+
+  groupRefreshTimer = setInterval(() => {
+    if (
+      state.page !== "groups" ||
+      !state.selectedGroup
+    ) {
+      return;
+    }
+
+    refreshGroupStatus().catch(error => {
+      console.warn(
+        "Group status refresh failed:",
+        error.message
+      );
+    });
+  }, 15000);
+
+  // -------------------------------------------------------
+  // Startup
+  // -------------------------------------------------------
+
   async function boot() {
+    updateRepeatButton();
+
+    if (tg) {
+      try {
+        tg.ready();
+        tg.expand();
+
+        tg.setHeaderColor("#100d17");
+        tg.setBackgroundColor("#100d17");
+      } catch (_) {}
+    }
+
     if (!initData) {
-      document.querySelector("main").innerHTML = `
-        <div class="empty" style="margin-top:40px">
+      $("mainContent").innerHTML = `
+        <div class="empty" style="margin-top:45px">
           Open Taalune from the Telegram bot to sign in securely.
         </div>
       `;
 
-      document.querySelector(".bottom-nav").style.display = "none";
+      document.querySelector(".bottom-nav").hidden = true;
       return;
     }
 
     try {
+      await restoreSelectedGroup();
+
       await loadProfile();
-      await Promise.allSettled([loadLikedTracks()]);
-      await loadHome();
+
+      await Promise.allSettled([
+        loadLikedTracks()
+      ]);
+
+      await loadHome(true);
 
     } catch (error) {
-      showToast(error.message);
+      console.error("Taalune startup failed:", error);
+
+      showToast(
+        error.message || "Unable to open Taalune."
+      );
     }
   }
 

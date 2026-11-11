@@ -21,7 +21,7 @@ from VampireMusic.helpers import Media, Track, buttons
 
 def _internal_stream_url(video_id: str) -> str:
     user_id = int(app.id)
-    expires = int(time.time()) + 6 * 3600
+    expires = int(time.time()) + 45 * 60
     payload = f"{user_id}:{video_id}:{expires}"
 
     signature = hmac.new(

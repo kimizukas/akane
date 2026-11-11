@@ -266,19 +266,19 @@ async def search_tracks(request):
 
 
 
-
-
-
-
 async def stream_track(request):
     video_id = request.match_info["video_id"]
     token = request.query.get("token", "")
 
     if not VIDEO_ID_RE.fullmatch(video_id):
-        raise web.HTTPBadRequest(text="Invalid video ID.")
+        raise web.HTTPBadRequest(
+            text="Invalid video ID."
+        )
 
     if not verify_stream_token(video_id, token):
-        raise web.HTTPForbidden(text="Invalid or expired stream token.")
+        raise web.HTTPForbidden(
+            text="Invalid or expired stream token."
+        )
 
     range_header = request.headers.get("Range")
 
@@ -289,7 +289,11 @@ async def stream_track(request):
     )
 
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(
+            timeout=timeout,
+            auto_decompress=False,
+        ) as session:
+
             for attempt in range(2):
                 stream = await yt.stream(
                     video_id,
@@ -299,7 +303,13 @@ async def stream_track(request):
                 if not stream or not stream.get("url"):
                     continue
 
-                headers = dict(stream.get("headers") or {})
+                headers = dict(
+                    stream.get("headers") or {}
+                )
+
+                # Prevent compressed upstream responses from
+                # conflicting with Content-Length / byte ranges.
+                headers["Accept-Encoding"] = "identity"
 
                 if range_header:
                     headers["Range"] = range_header
@@ -310,13 +320,16 @@ async def stream_track(request):
                     allow_redirects=True,
                 ) as upstream:
 
-                    if upstream.status == 403:
+                    if upstream.status in {401, 403, 410}:
                         logger.warning(
-                            "Audio CDN returned HTTP 403 for %s "
+                            "Audio CDN returned HTTP %s for %s "
                             "(attempt %s).",
+                            upstream.status,
                             video_id,
                             attempt + 1,
                         )
+
+                        # Discard the cached URL and resolve a new one.
                         continue
 
                     if upstream.status >= 400:
@@ -325,8 +338,14 @@ async def stream_track(request):
                             upstream.status,
                             video_id,
                         )
+
                         raise web.HTTPBadGateway(
                             text="Audio source unavailable."
+                        )
+
+                    if upstream.status not in {200, 206}:
+                        raise web.HTTPBadGateway(
+                            text="Unexpected audio source response."
                         )
 
                     response_headers = {
@@ -351,6 +370,7 @@ async def stream_track(request):
                         "Last-Modified",
                     ):
                         value = upstream.headers.get(name)
+
                         if value:
                             response_headers[name] = value
 
@@ -367,6 +387,7 @@ async def stream_track(request):
                         await response.write(chunk)
 
                     await response.write_eof()
+
                     return response
 
         raise web.HTTPBadGateway(
@@ -394,14 +415,10 @@ async def stream_track(request):
             "Mini App direct stream failed for %s.",
             video_id,
         )
+
         raise web.HTTPBadGateway(
             text="Unable to start audio stream."
         )
-
-
-
-
-            
 
     
 

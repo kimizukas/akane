@@ -41,27 +41,32 @@ def _internal_stream_url(video_id: str) -> str:
 
 class TgCall(PyTgCalls):
     def __init__(self):
-        # PyTgCalls instances are created for each assistant in boot().
-        self.clients = []
+    # PyTgCalls instances are created for each assistant in boot().
+    self.clients = []
 
-        # Suppress stream-ended updates while a stream is being replaced.
-        self.restarting = defaultdict(int)
+    # Suppress stream-ended updates while a stream is being replaced.
+    self.restarting = defaultdict(int)
 
-        # A new play/stop request invalidates older pending playback work.
-        self._generation = defaultdict(int)
+    # A new play/stop request invalidates older pending playback work.
+    self._generation = defaultdict(int)
 
-        # Serialize native call operations and queue transitions per chat.
-        self._play_locks = defaultdict(asyncio.Lock)
-        self._next_locks = defaultdict(asyncio.Lock)
+    # Serialize native call operations and queue transitions per chat.
+    self._play_locks = defaultdict(asyncio.Lock)
+    self._next_locks = defaultdict(asyncio.Lock)
 
-        # Thumbnail generation is CPU/RAM intensive; only one at a time.
-        self._thumbnail_semaphore = asyncio.Semaphore(1)
+    # Thumbnail generation is CPU/RAM intensive; only one at a time.
+    self._thumbnail_semaphore = asyncio.Semaphore(1)
 
-        # Limit simultaneous cold YouTube stream resolutions.
-        self._source_semaphore = asyncio.Semaphore(2)
+    # Limit simultaneous cold YouTube stream resolutions for VC.
+    self._source_semaphore = asyncio.Semaphore(2)
 
-        # Some native call updates can be emitted more than once.
-        self._last_stream_end = {}
+    # Track background next-track prefetches.
+    self._prefetch_tasks = {}
+
+    # Some native call updates can be emitted more than once.
+    self._last_stream_end = {}
+
+
 
     def _bump_generation(self, chat_id: int) -> int:
         self._generation[chat_id] += 1
@@ -250,74 +255,177 @@ class TgCall(PyTgCalls):
         return None, None
 
     def _build_media_stream(
-        self,
-        media: Media | Track,
-        source: str,
-        stream_headers: dict | None,
-        seek_time: int = 0,
-    ):
-        ffmpeg_parts = []
+    self,
+    media: Media | Track,
+    source: str,
+    stream_headers: dict | None,
+    seek_time: int = 0,
+):
+    ffmpeg_parts = []
 
-        if seek_time > 1:
-            ffmpeg_parts.extend(["-ss", str(int(seek_time))])
-
-        if not media.video:
-            ffmpeg_parts.append("-vn")
-
-        if isinstance(source, str) and source.startswith(("http://", "https://")):
-            allowed_headers = (
-                "User-Agent",
-                "Referer",
-                "Accept",
-                "Accept-Language",
-                "Origin",
-                "Cookie",
-            )
-            header_lines = []
-
-            for name in allowed_headers:
-                value = (stream_headers or {}).get(name)
-                if value:
-                    value = str(value).replace("\r", "").replace("\n", "")
-                    header_lines.append(f"{name}: {value}")
-
-            if header_lines:
-                header_value = "\r\n".join(header_lines) + "\r\n"
-                ffmpeg_parts.extend([
-                    "-headers",
-                    f'"{header_value}"',
-                ])
-
-            ffmpeg_parts.extend([
-                "-reconnect", "1",
-                "-reconnect_streamed", "1",
-                "-reconnect_delay_max", "5",
-                "-rw_timeout", "15000000",
-            ])
-
-        # Mild loudness lift with peak limiting; applied only to audio.
-        # Keep this output filter after all input-only FFmpeg arguments.
+    if seek_time > 1:
         ffmpeg_parts.extend([
-            "--audio",
-            "--mid",
-            "-af",
-            '"volume=1.08,alimiter=limit=0.98:level=false"',
+            "-ss",
+            str(int(seek_time)),
         ])
 
-        ffmpeg_params = " ".join(ffmpeg_parts) or None
+    if not media.video:
+        ffmpeg_parts.append("-vn")
 
-        return types.MediaStream(
-            media_path=source,
-            audio_parameters=types.AudioQuality.HIGH,
-            video_parameters=types.VideoQuality.HD_720p,
-            audio_flags=types.MediaStream.Flags.REQUIRED,
-            video_flags=(
-                types.MediaStream.Flags.AUTO_DETECT
-                if media.video
-                else types.MediaStream.Flags.IGNORE
-            ),
-            ffmpeg_parameters=ffmpeg_params,
+    if isinstance(source, str) and source.startswith(
+        ("http://", "https://")
+    ):
+        allowed_headers = (
+            "User-Agent",
+            "Referer",
+            "Accept",
+            "Accept-Language",
+            "Origin",
+            "Cookie",
         )
+
+        header_lines = []
+
+        for name in allowed_headers:
+            value = (stream_headers or {}).get(name)
+
+            if value:
+                value = str(value).replace("\r", "").replace("\n", "")
+                header_lines.append(f"{name}: {value}")
+
+        if header_lines:
+            header_value = "\r\n".join(header_lines) + "\r\n"
+
+            ffmpeg_parts.extend([
+                "-headers",
+                f'"{header_value}"',
+            ])
+
+        ffmpeg_parts.extend([
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+            "-rw_timeout", "15000000",
+        ])
+
+    # --audio selects the audio stream.
+    # -atmid puts -af after the input, where FFmpeg expects this filter.
+    ffmpeg_parts.extend([
+        "--audio",
+        "-atmid",
+        "-af",
+        '"volume=1.08,alimiter=limit=0.98:level=false"',
+    ])
+
+    ffmpeg_params = " ".join(ffmpeg_parts) or None
+
+    return types.MediaStream(
+        media_path=source,
+        audio_parameters=types.AudioQuality.HIGH,
+        video_parameters=types.VideoQuality.HD_720p,
+        audio_flags=types.MediaStream.Flags.REQUIRED,
+        video_flags=(
+            types.MediaStream.Flags.AUTO_DETECT
+            if media.video
+            else types.MediaStream.Flags.IGNORE
+        ),
+        ffmpeg_parameters=ffmpeg_params,
+    )
+
+
+def schedule_prefetch(self, chat_id: int) -> None:
+    items = queue.get_queue(chat_id)
+
+    if len(items) < 2:
+        return
+
+    next_media = items[1]
+
+    if not isinstance(next_media, Track) or next_media.video:
+        return
+
+    task_key = (
+        int(chat_id),
+        str(next_media.id),
+    )
+
+    existing = self._prefetch_tasks.get(task_key)
+
+    if existing and not existing.done():
+        return
+
+    # Prevent a large number of background jobs on a small VPS.
+    if len(self._prefetch_tasks) >= 8:
+        return
+
+    task = asyncio.create_task(
+        self._prefetch_track(
+            chat_id,
+            next_media,
+        )
+    )
+
+    self._prefetch_tasks[task_key] = task
+
+    def cleanup(done_task):
+        if self._prefetch_tasks.get(task_key) is done_task:
+            self._prefetch_tasks.pop(task_key, None)
+
+        try:
+            done_task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.debug(
+                "Next-track prefetch task failed in chat %s: %s",
+                chat_id,
+                type(exc).__name__,
+            )
+
+    task.add_done_callback(cleanup)
+
+
+async def _prefetch_track(
+    self,
+    chat_id: int,
+    media: Track,
+) -> None:
+    try:
+        items = queue.get_queue(chat_id)
+
+        if len(items) < 2 or items[1] is not media:
+            return
+
+        async with self._source_semaphore:
+            # The queue may have changed while this task was waiting.
+            items = queue.get_queue(chat_id)
+
+            if len(items) < 2 or items[1] is not media:
+                return
+
+            stream = await yt.stream(str(media.id))
+
+        if stream and stream.get("url"):
+            logger.debug(
+                "Next track source prefetched in chat %s: %s",
+                chat_id,
+                media.id,
+            )
+
+    except asyncio.CancelledError:
+        raise
+
+    except Exception as exc:
+        logger.debug(
+            "Next-track prefetch failed in chat %s: %s",
+            chat_id,
+            type(exc).__name__,
+        )
+
+
+
+
+
 
     async def _start_stream(
         self,
@@ -552,6 +660,7 @@ class TgCall(PyTgCalls):
 
             # Native playback is live. Do not keep the transition flag set
             # while generating a thumbnail or editing Telegram messages.
+            self.schedule_prefetch(chat_id)
             self._end_restart(chat_id)
             transition_active = False
 

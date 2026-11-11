@@ -1,4 +1,3 @@
-
 from pathlib import Path
 
 from pyrogram import filters, types
@@ -14,6 +13,8 @@ def playlist_to_queue(chat_id: int, tracks: list) -> str:
     for track in tracks:
         pos = queue.add(chat_id, track)
         text += f"<b>{pos}.</b> {track.title}\n"
+
+    VampireMusic.schedule_prefetch(chat_id)
 
     return text[:1948] + "</blockquote>"
 
@@ -175,7 +176,8 @@ async def play_hndlr(
             file,
         )
 
-        if position != 0 or await db.get_call(m.chat.id):
+       
+               if position != 0 or await db.get_call(m.chat.id):
             await sent.edit_text(
                 m.lang["play_queued"].format(
                     position,
@@ -190,6 +192,8 @@ async def play_hndlr(
                     m.lang["play_now"],
                 ),
             )
+
+            VampireMusic.schedule_prefetch(m.chat.id)
 
             if tracks:
                 added = playlist_to_queue(

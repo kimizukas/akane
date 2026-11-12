@@ -52,7 +52,7 @@ from .routers.groups import router as groups_router
 from .routers.social import router as social_router
 from .security import decode_access_token
 from .settings import settings
-
+from .routers.safety import router as safety_router
 
 logger = logging.getLogger(
     "VampireMusic.music_server.api"
@@ -353,6 +353,7 @@ def create_app() -> FastAPI:
     application.include_router(social_router)
     application.include_router(groups_router)
     application.include_router(admin_router)
+    application.include_router(safety_router)
 
     # -----------------------------------------------------
     # Health

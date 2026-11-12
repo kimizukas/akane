@@ -232,20 +232,23 @@ def _resolve_audio_stream(
     client_override: Optional[str] = None,
 ) -> dict:
     """
-    Resolve a fresh audio URL. Tries multiple player clients so transient
-    'source not found' errors from a single client don't break playback.
+    Resolve audio URL. Always tries explicit clients in order,
+    even when cookies are present, because yt-dlp's auto-selection
+    often picks 'web' which fails on flagged VPS IPs.
     """
     source = YOUTUBE_URL.format(video_id)
     has_cookies = _has_cookies()
 
-    clients_to_try: list[Optional[str]]
+    # Priority order: tv/mweb first (best cookie + anti-bot support),
+    # then web, then fallback clients.
     if client_override:
         clients_to_try = [client_override]
     elif has_cookies:
-        # Cookies handle auth; only try default client selection.
-        clients_to_try = [None]
+        # WITH cookies: use tv and mweb first (they honor cookies)
+        clients_to_try = ["tv", "mweb", "web", "android"]
     else:
-        clients_to_try = _configured_clients()
+        # WITHOUT cookies: tv and mweb still best for VPS IPs
+        clients_to_try = ["tv", "mweb", "web"]
 
     last_error: Optional[Exception] = None
 
@@ -288,16 +291,14 @@ def _resolve_audio_stream(
                 "url": url,
                 "headers": info.get("http_headers") or {},
                 "ext": info.get("ext") or "webm",
-                "client": client or "auto",
+                "client": client,
             }
 
         except Exception as exc:
             last_error = exc
             logger.debug(
-                "Resolve attempt failed (client=%s, id=%s): %s",
-                client or "auto",
-                video_id,
-                type(exc).__name__,
+                "Resolve failed (client=%s, id=%s): %s",
+                client, video_id, type(exc).__name__,
             )
             continue
 
@@ -305,7 +306,6 @@ def _resolve_audio_stream(
         f"Audio resolution failed for {video_id}: "
         f"{type(last_error).__name__ if last_error else 'unknown'}"
     )
-
 
 def _make_track(
     data: dict,

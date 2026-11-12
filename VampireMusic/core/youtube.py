@@ -29,17 +29,15 @@ YOUTUBE_URL = "https://www.youtube.com/watch?v={}"
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 # ----------------------------------------------------------------------
-# Stream cache: bounded LRU with TTL. URLs expire fast (~6h) but we keep
-# a short local TTL so failures are picked up quickly.
+# Stream cache: bounded LRU with TTL.
 # ----------------------------------------------------------------------
 _STREAM_CACHE: "OrderedDict[str, dict]" = OrderedDict()
-_STREAM_CACHE_TTL = 60            # seconds (URLs expire; keep short)
-_STREAM_CACHE_MAX = 128           # hard cap -> memory bounded
+_STREAM_CACHE_TTL = 60            # seconds
+_STREAM_CACHE_MAX = 128           # hard cap
 
 _STREAM_LOCKS: "OrderedDict[str, asyncio.Lock]" = OrderedDict()
 _STREAM_LOCKS_MAX = 256
 
-# Limit concurrent yt-dlp calls so RAM/CPU stays predictable under load.
 _STREAM_RESOLVE_SEMAPHORE = asyncio.Semaphore(3)
 
 # Preferred audio format (Opus in WebM is small + streams well).
@@ -49,9 +47,6 @@ _PREFERRED_FORMAT = (
     "bestaudio[ext=webm]/"
     "bestaudio/best"
 )
-
-# Preferred client order for fallback resolution.
-_DEFAULT_CLIENTS = ("web", "android", "ios", "tv_embedded")
 
 
 def time_to_seconds(value) -> int:
@@ -125,7 +120,6 @@ def _ydl_options(download: bool = False, video: bool = False) -> dict:
         "retries": 2,
         "fragment_retries": 2,
         "overwrites": False,
-        # Reduce memory while streaming info extraction.
         "extractor_args": {
             "youtube": {
                 "player_skip": ["configs"],
@@ -163,13 +157,10 @@ def _get_stream_lock(video_id: str) -> asyncio.Lock:
         _STREAM_LOCKS[video_id] = lock
         _STREAM_LOCKS.move_to_end(video_id)
 
-    # LRU eviction: only evict unlocked locks, never the one we return.
     while len(_STREAM_LOCKS) > _STREAM_LOCKS_MAX:
         key, candidate = next(iter(_STREAM_LOCKS.items()))
         if key == video_id or candidate.locked():
-            # move to end and try next
             _STREAM_LOCKS.move_to_end(key)
-            # if we reached the target again, break to avoid infinite loop
             if next(iter(_STREAM_LOCKS)) == video_id:
                 break
             continue
@@ -208,12 +199,10 @@ def _cache_stream(data: dict):
     }
     _STREAM_CACHE.move_to_end(str(video_id))
 
-    # Purge expired
     for key in list(_STREAM_CACHE.keys()):
         if _STREAM_CACHE[key]["expires"] <= now:
             _STREAM_CACHE.pop(key, None)
 
-    # LRU eviction
     while len(_STREAM_CACHE) > _STREAM_CACHE_MAX:
         _STREAM_CACHE.popitem(last=False)
 
@@ -224,7 +213,10 @@ def _configured_clients() -> list[str]:
         clients = [item.strip() for item in raw.split(",") if item.strip()]
         if clients:
             return clients
-    return list(_DEFAULT_CLIENTS)
+    # With cookies, yt-dlp recommends tv_downgraded, web_safari, web.
+    # We try tv_downgraded and web_safari first because 'web' often
+    # requires a PO token and fails on flagged VPS IPs.
+    return ["tv_downgraded", "web_safari", "web"]
 
 
 def _resolve_audio_stream(
@@ -232,23 +224,21 @@ def _resolve_audio_stream(
     client_override: Optional[str] = None,
 ) -> dict:
     """
-    Resolve audio URL. Always tries explicit clients in order,
-    even when cookies are present, because yt-dlp's auto-selection
-    often picks 'web' which fails on flagged VPS IPs.
+    Resolve audio URL using cookies-aware client order.
+
+    With cookies, yt-dlp recommends: tv_downgraded, web_safari, web.
+    We try tv_downgraded and web_safari first because 'web' often
+    requires a PO token and fails on flagged VPS IPs.
     """
     source = YOUTUBE_URL.format(video_id)
     has_cookies = _has_cookies()
 
-    # Priority order: tv/mweb first (best cookie + anti-bot support),
-    # then web, then fallback clients.
     if client_override:
         clients_to_try = [client_override]
     elif has_cookies:
-        # WITH cookies: use tv and mweb first (they honor cookies)
-        clients_to_try = ["tv", "mweb", "web", "android"]
+        clients_to_try = ["tv_downgraded", "web_safari", "web"]
     else:
-        # WITHOUT cookies: tv and mweb still best for VPS IPs
-        clients_to_try = ["tv", "mweb", "web"]
+        clients_to_try = ["tv_downgraded", "tv", "web_safari", "web"]
 
     last_error: Optional[Exception] = None
 
@@ -257,15 +247,13 @@ def _resolve_audio_stream(
         options.update({
             "ignoreerrors": False,
             "format": _PREFERRED_FORMAT,
-        })
-
-        if client:
-            options["extractor_args"] = {
+            "extractor_args": {
                 "youtube": {
                     "player_client": [client],
                     "player_skip": ["configs"],
                 },
-            }
+            },
+        })
 
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
@@ -306,6 +294,7 @@ def _resolve_audio_stream(
         f"Audio resolution failed for {video_id}: "
         f"{type(last_error).__name__ if last_error else 'unknown'}"
     )
+
 
 def _make_track(
     data: dict,

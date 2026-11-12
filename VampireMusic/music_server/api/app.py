@@ -53,6 +53,7 @@ from .routers.social import router as social_router
 from .security import decode_access_token
 from .settings import settings
 from .routers.safety import router as safety_router
+from .routers.group_controls import router as group_controls_router
 from .routers.moderation import router as moderation_router
 
 
@@ -357,6 +358,7 @@ def create_app() -> FastAPI:
     application.include_router(groups_router)
     application.include_router(admin_router)
     application.include_router(safety_router)
+    application.include_router(group_controls_router)
     application.include_router(moderation_router)
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 import uuid
 
 from io import BytesIO
@@ -30,7 +31,10 @@ from fastapi.responses import (
 from PIL import Image, UnidentifiedImageError
 
 from VampireMusic import yt
-from VampireMusic.core.youtube import VIDEO_ID_RE
+from VampireMusic.core.youtube import (
+    VIDEO_ID_RE,
+    invalidate_stream_cache,
+)
 
 from .dependencies import get_discover_service
 from .discover import DiscoverError, DiscoverService
@@ -57,7 +61,6 @@ class StreamTokenRequest(APIModel):
     video_id: str
 
 
-# Common MIME types for the audio formats we may proxy.
 _EXT_MIME = {
     "webm": "audio/webm",
     "opus": "audio/ogg",
@@ -86,7 +89,9 @@ def _serialize_search_track(track: Any) -> dict[str, Any] | None:
     return {
         "id": track_id,
         "title": title[:160],
-        "artist": str(getattr(track, "channel_name", "") or "Unknown artist")[:160],
+        "artist": str(
+            getattr(track, "channel_name", "") or "Unknown artist"
+        )[:160],
         "duration": str(getattr(track, "duration", "") or ""),
         "duration_sec": max(0, min(duration, 86400)),
         "thumbnail": getattr(track, "thumbnail", None),
@@ -96,13 +101,16 @@ def _serialize_search_track(track: Any) -> dict[str, Any] | None:
 
 async def _search_music(query: str, limit: int) -> list[dict[str, Any]]:
     query = str(query or "").strip()
+
     if not query or len(query) > 200:
         raise HTTPException(status_code=400, detail="invalid_query")
 
     limit = max(1, min(int(limit), 20))
 
     try:
-        tracks = await yt.search_multi(query=query, m_id=0, video=False, limit=limit)
+        tracks = await yt.search_multi(
+            query=query, m_id=0, video=False, limit=limit,
+        )
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -111,6 +119,7 @@ async def _search_music(query: str, limit: int) -> list[dict[str, Any]]:
 
     results = []
     seen = set()
+
     for track in tracks or []:
         item = _serialize_search_track(track)
         if not item:
@@ -148,33 +157,27 @@ async def create_stream_token(
     user: dict = Depends(get_current_user),
 ):
     video_id = payload.video_id.strip()
+
     if not VIDEO_ID_RE.fullmatch(video_id):
         raise HTTPException(status_code=400, detail="invalid_video_id")
 
-    # Pre-flight resolution so frontend gets an error before audio element loads.
+    # Pre-flight: try resolving once so the browser knows if it'll fail
     stream = None
-    for attempt in range(2):
-        try:
-            stream = await yt.stream(video_id, force_refresh=bool(attempt))
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning(
-                "Stream preflight attempt %d failed for %s: %s",
-                attempt + 1,
-                video_id,
-                type(exc).__name__,
-            )
-            stream = None
-
-        if stream and stream.get("url"):
-            break
+    try:
+        stream = await yt.stream(video_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Stream preflight failed for %s: %s",
+            video_id, type(exc).__name__,
+        )
+        stream = None
 
     if not stream or not stream.get("url"):
         raise HTTPException(status_code=502, detail="stream_unavailable")
 
-    import time
-    expires = int(time.time()) + 15 * 60
+    expires = int(time.time()) + settings.stream_token_ttl
     token = create_signed_stream_token(int(user["id"]), video_id, expires)
 
     return {
@@ -192,16 +195,22 @@ async def stream_track(
     token: str = Query(min_length=20, max_length=256),
 ):
     """
-    Signed audio proxy. Upstreams temporary CDN URLs through our server
-    so browsers never see expired YouTube links, and we can refresh on
-    401/403/410 transparently.
+    Signed audio proxy. Upstream CDN URLs are refreshed on 401/403/410
+    so the browser never sees an expired link.
+
+    The youtube.py resolver blacklists broken clients per-video for
+    5 minutes, so a forced refresh after a 403 automatically tries a
+    DIFFERENT client — no more same-client retry loop.
     """
     if not VIDEO_ID_RE.fullmatch(video_id):
         raise HTTPException(status_code=400, detail="invalid_video_id")
 
     user_id = verify_signed_stream_token(video_id, token)
     if not user_id:
-        raise HTTPException(status_code=403, detail="invalid_or_expired_stream_token")
+        raise HTTPException(
+            status_code=403,
+            detail="invalid_or_expired_stream_token",
+        )
 
     range_header = request.headers.get("Range")
     if_range = request.headers.get("If-Range")
@@ -230,7 +239,10 @@ async def stream_track(
     try:
         for attempt in range(3):
             try:
-                stream = await yt.stream(video_id, force_refresh=bool(attempt))
+                stream = await yt.stream(
+                    video_id,
+                    force_refresh=bool(attempt),
+                )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -242,7 +254,7 @@ async def stream_track(
 
             if not stream or not stream.get("url"):
                 if attempt < 2:
-                    await asyncio.sleep(0.25)
+                    await asyncio.sleep(0.4)
                     continue
                 break
 
@@ -265,7 +277,9 @@ async def stream_track(
             if if_range:
                 headers["If-Range"] = if_range
 
-            upstream_request = client.build_request("GET", stream["url"], headers=headers)
+            upstream_request = client.build_request(
+                "GET", stream["url"], headers=headers,
+            )
             upstream = await client.send(upstream_request, stream=True)
 
             if upstream.status_code in {401, 403, 410}:
@@ -275,9 +289,10 @@ async def stream_track(
                 )
                 await upstream.aclose()
                 upstream = None
-                # Invalidate cache and retry
-                from VampireMusic.core.youtube import invalidate_stream_cache
+                # Invalidate stream cache AND client failures so
+                # next attempt tries a different client for this video.
                 invalidate_stream_cache(video_id)
+                await asyncio.sleep(0.3)
                 continue
 
             if upstream.status_code == 416:
@@ -300,11 +315,10 @@ async def stream_track(
                 await upstream.aclose()
                 upstream = None
                 if attempt < 2:
-                    await asyncio.sleep(0.25)
+                    await asyncio.sleep(0.4)
                     continue
                 break
 
-            # Content-Type: prefer our ext-based mapping for consistency.
             upstream_ct = (upstream.headers.get("Content-Type") or "").lower()
             if upstream_ct.startswith("audio/"):
                 content_type = upstream_ct
@@ -319,7 +333,9 @@ async def stream_track(
                 "Cache-Control": "private, no-store",
                 "X-Content-Type-Options": "nosniff",
                 "X-Accel-Buffering": "no",
-                "Accept-Ranges": upstream.headers.get("Accept-Ranges", "bytes"),
+                "Accept-Ranges": upstream.headers.get(
+                    "Accept-Ranges", "bytes",
+                ),
             }
             for name in ("Content-Length", "Content-Range", "ETag", "Last-Modified"):
                 value = upstream.headers.get(name)
@@ -335,7 +351,9 @@ async def stream_track(
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    logger.warning("Audio transfer interrupted for %s.", video_id)
+                    logger.warning(
+                        "Audio transfer interrupted for %s.", video_id,
+                    )
                     raise
                 finally:
                     await selected_response.aclose()
@@ -349,7 +367,10 @@ async def stream_track(
             )
 
         await client.aclose()
-        raise HTTPException(status_code=502, detail="stream_unavailable_after_refresh")
+        raise HTTPException(
+            status_code=502,
+            detail="stream_unavailable_after_refresh",
+        )
 
     except HTTPException:
         if upstream is not None:
@@ -368,7 +389,9 @@ async def stream_track(
             await upstream.aclose()
         await client.aclose()
         logger.exception("Mini App audio proxy failed for %s.", video_id)
-        raise HTTPException(status_code=502, detail="audio_proxy_failed") from exc
+        raise HTTPException(
+            status_code=502, detail="audio_proxy_failed",
+        ) from exc
 
 
 def _validate_and_save_image(data: bytes, destination: Path) -> None:
@@ -381,7 +404,6 @@ def _validate_and_save_image(data: bytes, destination: Path) -> None:
         with Image.open(BytesIO(data)) as image:
             if image.format not in {"JPEG", "PNG", "WEBP"}:
                 raise ValueError("unsupported_image")
-
             width, height = image.size
             if width <= 0 or height <= 0 or width * height > 30_000_000:
                 raise ValueError("image_dimensions_invalid")
@@ -400,7 +422,11 @@ def _validate_and_save_image(data: bytes, destination: Path) -> None:
             )
     except ValueError:
         raise
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+    except (
+        UnidentifiedImageError,
+        OSError,
+        Image.DecompressionBombError,
+    ) as exc:
         raise ValueError("unsupported_image") from exc
 
 
@@ -468,4 +494,6 @@ async def recommendations(
         result = await discover.recommend(int(user["id"]), payload)
         return {"ok": True, **result}
     except DiscoverError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
+        raise HTTPException(
+            status_code=exc.status_code, detail=exc.code,
+        ) from exc

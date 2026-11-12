@@ -68,60 +68,54 @@ FRONTEND_DIST = BASE_DIR / "dist"
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    settings.upload_directory.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    settings.upload_directory.mkdir(parents=True, exist_ok=True)
 
     repository = MusicRepository()
     application.state.repository = repository
-
-    application.state.group_service = GroupService(
-        repository,
-    )
-
-    application.state.discover_service = create_discover_service(
-        repository,
-    )
-
+    application.state.group_service = GroupService(repository)
+    application.state.discover_service = create_discover_service(repository)
     application.state.upload_limits = {}
     application.state.upload_lock = asyncio.Lock()
 
     try:
         await repository.ensure_indexes()
-
-        logger.info(
-            "Taalune MongoDB indexes are ready."
-        )
-
+        logger.info("Taalune MongoDB indexes are ready.")
     except asyncio.CancelledError:
         raise
-
     except Exception:
         repository.ready = False
-
-        logger.exception(
-            "Taalune social storage initialization failed."
-        )
-
-        # The FastAPI process may still serve health checks and group
-        # endpoints. Repository-backed endpoints report storage unavailable.
+        logger.exception("Taalune social storage initialization failed.")
     else:
         application.state.repository_ready = True
 
     application.state.repository_ready = repository.ready
 
-    logger.info(
-        "Taalune FastAPI backend started."
-    )
+    logger.info("Taalune FastAPI backend started.")
 
     try:
         yield
-
     finally:
-        logger.info(
-            "Taalune FastAPI backend stopping."
-        )
+        # ----- Shutdown cleanup -----
+        logger.info("Taalune FastAPI backend stopping.")
+
+        # Clear stream cache + upload locks so memory is released promptly.
+        try:
+            from VampireMusic.core.youtube import invalidate_stream_cache_for_all
+            invalidate_stream_cache_for_all()
+        except Exception:
+            pass
+
+        application.state.upload_limits.clear()
+
+        # Give in-flight requests a moment then drop references.
+        try:
+            repository_inst = getattr(application.state, "repository", None)
+            if repository_inst is not None:
+                repository_inst.ready = False
+        except Exception:
+            pass
+
+        logger.info("Taalune FastAPI backend stopped.")
 
 
 def create_app() -> FastAPI:

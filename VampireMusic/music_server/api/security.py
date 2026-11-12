@@ -22,12 +22,19 @@ from .settings import (
 
 
 def _b64encode(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+    return (
+        base64.urlsafe_b64encode(value)
+        .rstrip(b"=")
+        .decode("ascii")
+    )
 
 
 def _b64decode(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode(value + padding)
+
+    return base64.urlsafe_b64decode(
+        value + padding
+    )
 
 
 def _json_encode(value: dict[str, Any]) -> str:
@@ -41,7 +48,9 @@ def _json_encode(value: dict[str, Any]) -> str:
 
 
 def _json_decode(value: str) -> dict[str, Any]:
-    decoded = json.loads(_b64decode(value))
+    decoded = json.loads(
+        _b64decode(value)
+    )
 
     if not isinstance(decoded, dict):
         raise ValueError("Invalid token payload.")
@@ -55,9 +64,11 @@ def verify_telegram_init_data(
     max_age: int | None = None,
 ) -> dict[str, Any] | None:
     """
-    Validate Telegram WebApp initData using Telegram's HMAC scheme.
+    Validate Telegram Mini App initData.
 
-    initDataUnsafe is never trusted by this backend.
+    HMAC data-check string contains every received field except `hash`.
+    The `signature` field is retained in this HMAC validation because
+    it is part of the received parameters.
     """
     if not isinstance(init_data, str):
         return None
@@ -72,30 +83,33 @@ def verify_telegram_init_data(
             strict_parsing=True,
         )
 
-        # Reject duplicate keys rather than accepting ambiguous values.
         values: dict[str, str] = {}
 
         for key, value in pairs:
             if key in values:
                 return None
+
             values[key] = value
 
         received_hash = values.pop("hash", None)
 
-        # Telegram may include this separately signed field.
-        # It is excluded from the bot-token HMAC data-check string.
-        values.pop("signature", None)
-
         if not received_hash or len(received_hash) != 64:
             return None
 
-        auth_date = int(values.get("auth_date", "0"))
+        auth_date = int(
+            values.get("auth_date", "0")
+        )
+
         now = int(time.time())
 
         if auth_date <= 0 or auth_date > now + 60:
             return None
 
-        allowed_age = max_age or settings.auth_max_age
+        allowed_age = (
+            max_age
+            if max_age is not None
+            else settings.auth_max_age
+        )
 
         if now - auth_date > allowed_age:
             return None
@@ -105,6 +119,8 @@ def verify_telegram_init_data(
             for key, value in sorted(values.items())
         )
 
+        # Telegram HMAC:
+        # secret_key = HMAC_SHA256(key="WebAppData", message=bot_token)
         secret_key = hmac.new(
             b"WebAppData",
             get_bot_token().encode("utf-8"),
@@ -123,20 +139,28 @@ def verify_telegram_init_data(
         ):
             return None
 
-        user_data = json.loads(values.get("user", "{}"))
+        user_data = json.loads(
+            values.get("user", "{}")
+        )
 
         if not isinstance(user_data, dict):
             return None
 
-        user_id = int(user_data.get("id", 0))
+        user_id = int(
+            user_data.get("id", 0)
+        )
 
         if user_id <= 0:
             return None
 
         return {
             "id": user_id,
-            "first_name": str(user_data.get("first_name") or "")[:64],
-            "last_name": str(user_data.get("last_name") or "")[:64],
+            "first_name": str(
+                user_data.get("first_name") or ""
+            )[:64],
+            "last_name": str(
+                user_data.get("last_name") or ""
+            )[:64],
             "username": (
                 str(user_data["username"])[:64]
                 if user_data.get("username")
@@ -167,7 +191,9 @@ def verify_telegram_init_data(
         return None
 
 
-def create_access_token(user: dict[str, Any]) -> str:
+def create_access_token(
+    user: dict[str, Any],
+) -> str:
     now = int(time.time())
 
     header = {
@@ -177,7 +203,9 @@ def create_access_token(user: dict[str, Any]) -> str:
 
     payload = {
         "sub": str(int(user["id"])),
-        "first_name": str(user.get("first_name") or "")[:64],
+        "first_name": str(
+            user.get("first_name") or ""
+        )[:64],
         "username": user.get("username"),
         "iat": now,
         "exp": now + settings.access_token_ttl,
@@ -187,7 +215,9 @@ def create_access_token(user: dict[str, Any]) -> str:
     encoded_header = _json_encode(header)
     encoded_payload = _json_encode(payload)
 
-    signing_input = f"{encoded_header}.{encoded_payload}"
+    signing_input = (
+        f"{encoded_header}.{encoded_payload}"
+    )
 
     signature = hmac.new(
         get_jwt_secret(),
@@ -195,10 +225,14 @@ def create_access_token(user: dict[str, Any]) -> str:
         hashlib.sha256,
     ).digest()
 
-    return f"{signing_input}.{_b64encode(signature)}"
+    return (
+        f"{signing_input}.{_b64encode(signature)}"
+    )
 
 
-def decode_access_token(token: str) -> dict[str, Any] | None:
+def decode_access_token(
+    token: str,
+) -> dict[str, Any] | None:
     if not isinstance(token, str) or len(token) > 4096:
         return None
 
@@ -210,8 +244,13 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
 
         encoded_header, encoded_payload, signature = parts
 
-        header = _json_decode(encoded_header)
-        payload = _json_decode(encoded_payload)
+        header = _json_decode(
+            encoded_header
+        )
+
+        payload = _json_decode(
+            encoded_payload
+        )
 
         if header.get("alg") != "HS256":
             return None
@@ -219,7 +258,9 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
         if header.get("typ") != "JWT":
             return None
 
-        signing_input = f"{encoded_header}.{encoded_payload}"
+        signing_input = (
+            f"{encoded_header}.{encoded_payload}"
+        )
 
         expected = hmac.new(
             get_jwt_secret(),
@@ -241,14 +282,18 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
         if int(payload.get("exp", 0)) <= now:
             return None
 
-        user_id = int(payload.get("sub", 0))
+        user_id = int(
+            payload.get("sub", 0)
+        )
 
         if user_id <= 0:
             return None
 
         return {
             "id": user_id,
-            "first_name": str(payload.get("first_name") or ""),
+            "first_name": str(
+                payload.get("first_name") or ""
+            ),
             "username": payload.get("username"),
         }
 
@@ -261,16 +306,18 @@ def new_refresh_token() -> str:
 
 
 def hash_refresh_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        token.encode("utf-8")
+    ).hexdigest()
 
 
-async def issue_session(user: dict[str, Any]) -> dict[str, Any]:
-    """
-    Create a short-lived access token and a persisted refresh session.
-    Only the SHA-256 hash of the refresh token is stored in MongoDB.
-    """
+async def issue_session(
+    user: dict[str, Any],
+) -> dict[str, Any]:
     refresh_token = new_refresh_token()
-    refresh_hash = hash_refresh_token(refresh_token)
+    refresh_hash = hash_refresh_token(
+        refresh_token,
+    )
 
     now = int(time.time())
     expires_at = now + settings.refresh_token_ttl
@@ -301,7 +348,10 @@ async def rotate_refresh_token(
             detail="invalid_refresh_token",
         )
 
-    digest = hash_refresh_token(refresh_token)
+    digest = hash_refresh_token(
+        refresh_token,
+    )
+
     now = int(time.time())
 
     session = await db.db.music_sessions.find_one({
@@ -342,7 +392,7 @@ async def rotate_refresh_token(
         ),
     }
 
-    # Atomic single-use rotation: the old refresh token cannot be reused.
+    # Atomic single-use refresh token rotation.
     result = await db.db.music_sessions.update_one(
         {
             "_id": digest,
@@ -364,22 +414,23 @@ async def rotate_refresh_token(
         )
 
     tokens = await issue_session(user)
+
     return user, tokens
 
 
-async def get_current_user(request: Request) -> dict[str, Any]:
-    """
-    Supports:
-      1. Bearer access JWT
-      2. Telegram initData during initial app authentication
+async def get_current_user(
+    request: Request,
+) -> dict[str, Any]:
+    authorization = request.headers.get(
+        "Authorization",
+        "",
+    )
 
-    The browser must never send initDataUnsafe as an authentication source.
-    """
-    authorization = request.headers.get("Authorization", "")
     user: dict[str, Any] | None = None
 
     if authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
+
         user = decode_access_token(token)
 
         if not user:
@@ -394,7 +445,9 @@ async def get_current_user(request: Request) -> dict[str, Any]:
             "",
         )
 
-        user = verify_telegram_init_data(init_data)
+        user = verify_telegram_init_data(
+            init_data,
+        )
 
         if not user:
             raise HTTPException(
@@ -425,7 +478,9 @@ async def get_current_user(request: Request) -> dict[str, Any]:
     return user
 
 
-async def require_owner(user: dict[str, Any]) -> dict[str, Any]:
+async def require_owner(
+    user: dict[str, Any],
+) -> dict[str, Any]:
     from VampireMusic import config
 
     if int(user["id"]) != int(config.OWNER_ID):
@@ -441,8 +496,18 @@ def verify_signed_stream_token(
     video_id: str,
     token: str,
 ) -> int | None:
+    """
+    Verify both:
+      - 15-minute Mini App stream tokens
+      - Existing 45-minute internal voice-chat stream tokens
+
+    The existing core/calls.py uses the same bot-token HMAC format.
+    """
     try:
-        user_text, expires_text, received_signature = token.split(".", 2)
+        user_text, expires_text, received_signature = token.split(
+            ".",
+            2,
+        )
 
         user_id = int(user_text)
         expires = int(expires_text)
@@ -451,10 +516,13 @@ def verify_signed_stream_token(
         if user_id <= 0 or expires <= now:
             return None
 
-        if expires > now + 15 * 60:
+        # Existing TgCall._internal_stream_url() uses 45 minutes.
+        if expires > now + 6 * 60 * 60:
             return None
 
-        payload = f"{user_id}:{video_id}:{expires}"
+        payload = (
+            f"{user_id}:{video_id}:{expires}"
+        )
 
         expected = hmac.new(
             get_bot_token().encode("utf-8"),
@@ -462,7 +530,10 @@ def verify_signed_stream_token(
             hashlib.sha256,
         ).hexdigest()
 
-        if not hmac.compare_digest(expected, received_signature):
+        if not hmac.compare_digest(
+            expected,
+            received_signature,
+        ):
             return None
 
         return user_id
@@ -476,7 +547,9 @@ def create_signed_stream_token(
     video_id: str,
     expires: int,
 ) -> str:
-    payload = f"{int(user_id)}:{video_id}:{int(expires)}"
+    payload = (
+        f"{int(user_id)}:{video_id}:{int(expires)}"
+    )
 
     signature = hmac.new(
         get_bot_token().encode("utf-8"),
@@ -484,4 +557,8 @@ def create_signed_stream_token(
         hashlib.sha256,
     ).hexdigest()
 
-    return f"{int(user_id)}.{int(expires)}.{signature}"
+    return (
+        f"{int(user_id)}."
+        f"{int(expires)}."
+        f"{signature}"
+    )

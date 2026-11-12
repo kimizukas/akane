@@ -34,7 +34,7 @@ AUTH_MAX_AGE = 24 * 60 * 60
 MAX_COVER_SIZE = 5 * 1024 * 1024
 MAX_REQUEST_SIZE = MAX_COVER_SIZE + (128 * 1024)
 
-CATBOX_API_URL = "https://catbox.moe/user/api.php"
+CATBOX_API_URL = "https://pomf.lain.la/upload.php"
 
 _COVER_UPLOAD_COOLDOWN = 8
 _COVER_UPLOAD_LAST = {}

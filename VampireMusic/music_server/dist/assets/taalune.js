@@ -44,7 +44,8 @@
     account_unavailable: "This account is not available.",
     deletion_confirmation_mismatch: "Type DELETE exactly to confirm account deletion.",
     report_rate_limit: "You have sent too many reports. Try again later.",
-    invalid_track_id: "That song identifier is invalid."
+    invalid_track_id: "That song identifier is invalid.",
+    stream_token_expired: "Your stream token expired. Please try again."
   };
 
   const state = {
@@ -60,6 +61,7 @@
     liked: [],
     likedLoaded: false,
     history: [],
+    homeTracks: [],
     notifications: [],
     settings: null,
     privacy: null,
@@ -95,7 +97,8 @@
     modalTargetPlaylist: null,
     activeUpload: null,
     profileVisibility: "public",
-    groupBusy: false
+    groupBusy: false,
+    homeBusy: false
   };
 
   const ICONS = {
@@ -141,13 +144,13 @@
     return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
   }
 
-  function showToast(message) {
+  function showToast(message, timeout = 2800) {
     const el = $("toast");
     if (!el) return;
     el.textContent = String(message || "Something went wrong.");
     el.classList.add("show");
     clearTimeout(state.toastTimer);
-    state.toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
+    state.toastTimer = setTimeout(() => el.classList.remove("show"), timeout);
   }
 
   function normalizeError(data, status) {
@@ -237,10 +240,11 @@
   }
 
   function trackPayload(track) {
+    if (!track) return null;
     return {
       id: String(track.id),
       title: String(track.title || "Unknown title").slice(0, 160),
-      artist: String(track.artist || "Unknown artist").slice(0, 160),
+      artist: String(track.artist || track.channel_name || "Unknown artist").slice(0, 160),
       duration_sec: Math.max(0, Math.min(86400, Number(track.duration_sec) || 0)),
       thumbnail: track.thumbnail || null,
       url: track.url || null
@@ -254,10 +258,15 @@
   function findTrack(id) {
     const sources = [state.searchResults, state.liked, state.history, state.homeTracks || [], state.activePlaylist?.tracks || [], state.queue];
     for (const list of sources) {
+      if (!Array.isArray(list)) continue;
       const found = list.find((item) => String(item.id) === String(id));
       if (found) return found;
     }
     return state.currentTrack && String(state.currentTrack.id) === String(id) ? state.currentTrack : null;
+  }
+
+  function findPlaylist(id) {
+    return [state.playlists, state.discover, state.fresh, state.activePlaylist ? [state.activePlaylist] : []].flat().find((p) => p && String(p.id) === String(id)) || null;
   }
 
   function trackRow(track, options = {}) {
@@ -379,7 +388,7 @@
         ${image(track.thumbnail, "track-cover")}
         <div class="track-copy"><div class="track-title">${esc(track.title)}</div><div class="track-sub">${esc(track.artist || "Unknown artist")}${index === currentIndex ? " · Now playing" : ""}</div></div>
         <div class="track-actions">${index > currentIndex ? `<button class="track-action" data-action="queue-up" data-index="${index}" aria-label="Move up" ${index === currentIndex + 1 ? "disabled" : ""}>↑</button><button class="track-action" data-action="queue-down" data-index="${index}" aria-label="Move down" ${index === state.queue.length - 1 ? "disabled" : ""}>↓</button>` : ""}<button class="track-action" data-action="queue-play" data-index="${index}" aria-label="Play this track">${icon("play", 16)}</button><button class="track-action" data-action="queue-remove" data-index="${index}" aria-label="Remove from queue">${icon("close", 16)}</button></div>
-      </article>`).join("") : emptyState("Your queue is empty.")
+      </article>`).join("") : emptyState("Your queue is empty.");
   }
 
   async function loadProfile() {
@@ -502,7 +511,7 @@
     const isTrackList = scope === "liked" || scope === "history";
     target.className = isTrackList ? "list" : "grid";
     target.innerHTML = `<div class="skeleton"></div><div class="skeleton"></div>`;
-    status.textContent = "Loading…";
+    if (status) status.textContent = "Loading…";
     try {
       let items = [];
       if (scope === "liked") {
@@ -520,10 +529,10 @@
         if (scope === "mine") state.playlists = items;
         target.innerHTML = items.length ? items.map(playlistCard).join("") : emptyState(scope === "discover" ? "Public playlists will appear here." : "Nothing here yet.");
       }
-      status.textContent = `${items.length} ${isTrackList ? "tracks" : "playlists"}`;
+      if (status) status.textContent = `${items.length} ${isTrackList ? "tracks" : "playlists"}`;
     } catch (error) {
       target.innerHTML = emptyState(error.message);
-      status.textContent = "Unable to load this section.";
+      if (status) status.textContent = "Unable to load this section.";
     }
   }
 
@@ -585,20 +594,17 @@
   async function loadGroups(offset = 0) {
     const target = $("savedGroups");
     if (!target) return;
-
     const append = Number(offset) > 0;
     if (!append) {
       state.groups = [];
       state.groupOffset = null;
       target.innerHTML = `<div class="skeleton"></div><div class="skeleton"></div>`;
     }
-
     try {
       const data = await api(`/api/groups?limit=20&offset=${Math.max(0, Number(offset) || 0)}`);
       const nextItems = Array.isArray(data.groups) ? data.groups : [];
       state.groups = append ? [...state.groups, ...nextItems] : nextItems;
       state.groupOffset = data.next_offset ?? null;
-
       const groupMarkup = state.groups.map((group) => `
         <article class="group-row">
           <div class="group-avatar">${icon("users", 18)}</div>
@@ -609,15 +615,12 @@
           <button class="secondary-button" data-action="select-group" data-id="${esc(group.chat_id)}">${Number(state.selectedGroup?.chat_id) === Number(group.chat_id) ? "Selected" : "Open"}</button>
         </article>
       `).join("");
-
       const moreMarkup = state.groupOffset !== null
         ? `<div class="load-more-wrap"><button class="secondary-button" data-action="load-more-groups">Load more groups</button></div>`
         : "";
-
       target.innerHTML = groupMarkup
         ? `${groupMarkup}${moreMarkup}`
         : emptyState("No saved groups were found. Connect a supergroup below.");
-
       if (state.selectedGroup) await refreshGroupStatus();
     } catch (error) {
       if (!append) target.innerHTML = emptyState(error.message);
@@ -865,10 +868,6 @@
     target.innerHTML = (data.results || []).map((item) => kind === "reports" ? `<article class="notification"><div class="track-copy"><strong>${esc(item.target_type)} · ${esc(item.reason)}</strong><p>${esc(item.details || "No details")}</p><div class="track-sub">Report ${esc(item.id)} · target ${esc(item.target?.id || "")}</div></div><button class="secondary-button" data-action="review-report" data-id="${esc(item.id)}">Review</button></article>` : `<article class="notification"><div class="track-copy"><strong>${esc(item.user?.display_name || "Deleted user request")}</strong><div class="track-sub">${esc(item.request_id)} · ${esc(item.reason || "No reason")}</div></div><button class="secondary-button" data-action="review-deletion" data-id="${esc(item.request_id)}">Review</button></article>`).join("") || emptyState("Nothing to review.");
   }
 
-  function renderModalField(label, id, value = "", type = "text", attrs = "") {
-    return `<label class="field"><span>${esc(label)}</span><input id="${esc(id)}" type="${esc(type)}" value="${esc(value)}" ${attrs}></label>`;
-  }
-
   function createPlaylistModal() {
     openModal("Create playlist", `<form id="createPlaylistForm" class="form-grid"><label class="field full"><span>Playlist name</span><input id="newPlaylistName" maxlength="60" required placeholder="Give your playlist a name"></label><label class="field full"><span>Description</span><textarea id="newPlaylistDescription" maxlength="300" rows="3" placeholder="Optional description"></textarea></label><label class="field"><span>Visibility</span><select id="newPlaylistVisibility"><option value="private">Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select></label><label class="field"><span>Cover image</span><input id="newPlaylistCover" type="file" accept="image/jpeg,image/png,image/webp"></label><div class="field full"><div id="newPlaylistCoverStatus" class="track-sub">Choose a JPG, PNG or WebP image (maximum 5 MB).</div></div></form>`, `<button class="secondary-button" data-action="close-modal">Cancel</button><button class="primary-button" data-action="submit-create-playlist">Create playlist</button>`);
   }
@@ -937,7 +936,8 @@
   }
 
   async function uploadSelectedCover(inputId) {
-    const file = $(inputId)?.files?.[0];
+    const input = $(inputId);
+    const file = input?.files?.[0];
     if (!file) return null;
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("Use a valid JPG, PNG or WebP image.");
     if (file.size <= 0 || file.size > 5 * 1024 * 1024) throw new Error("Image must be 5 MB or smaller.");
@@ -1028,10 +1028,6 @@
     else if (state.page === "home") loadHome(true);
   }
 
-  function findPlaylist(id) {
-    return [state.playlists, state.discover, state.fresh, state.activePlaylist ? [state.activePlaylist] : []].flat().find((p) => String(p.id) === String(id)) || null;
-  }
-
   async function togglePlaylistLike() {
     const p = state.activePlaylist;
     if (!p) return;
@@ -1110,7 +1106,7 @@
 
   async function deletePlaylist() {
     const p = state.activePlaylist;
-    if (!p || !confirm(`Delete “${p.name}”? This cannot be undone.`)) return;
+    if (!p || !confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
     await api(`/api/playlists/${encodeURIComponent(p.id)}`, { method: "DELETE" });
     state.activePlaylist = null;
     closeModal();
@@ -1199,9 +1195,22 @@
     showToast(data.message || "Deletion request submitted");
   }
 
+  // ============================================================
+  // PLAYBACK ENGINE — fixed: no reloads, no leaks, safe retry
+  // ============================================================
+
+  function releaseAudio() {
+    try {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    } catch (_) {}
+  }
+
   function updatePlayer() {
     const track = state.currentTrack;
     const mini = $("miniPlayer");
+    if (!mini) return;
     if (!track) {
       mini.hidden = true;
       $("miniTitle").textContent = "Nothing playing";
@@ -1231,10 +1240,14 @@
     const duration = Number(audio.duration) || Number(state.currentTrack.duration_sec) || 0;
     const current = Number(audio.currentTime) || 0;
     const ratio = duration > 0 ? Math.min(1, Math.max(0, current / duration)) : 0;
-    $("miniProgress").style.width = `${ratio * 100}%`;
-    $("seek").value = String(Math.round(ratio * 1000));
-    $("elapsed").textContent = formatTime(current);
-    $("remaining").textContent = duration > 0 ? `-${formatTime(Math.max(0, duration - current))}` : "--:--";
+    const miniProgress = $("miniProgress");
+    if (miniProgress) miniProgress.style.width = `${ratio * 100}%`;
+    const seek = $("seek");
+    if (seek) seek.value = String(Math.round(ratio * 1000));
+    const elapsed = $("elapsed");
+    if (elapsed) elapsed.textContent = formatTime(current);
+    const remaining = $("remaining");
+    if (remaining) remaining.textContent = duration > 0 ? `-${formatTime(Math.max(0, duration - current))}` : "--:--";
     if (duration > 0 && current >= Math.min(30, Math.max(1, Math.floor(duration / 2)))) recordListeningOnce();
   }
 
@@ -1259,11 +1272,45 @@
     }
   }
 
+  async function waitForMetadata(requestId, timeoutMs = 20000) {
+    if (requestId !== state.playbackRequest) return Promise.reject(new DOMException("Playback replaced", "AbortError"));
+    if (audio.readyState >= 1) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      let done = false;
+      let timer;
+      const clean = () => {
+        done = true;
+        clearTimeout(timer);
+        audio.removeEventListener("loadedmetadata", onLoaded);
+        audio.removeEventListener("error", onError);
+      };
+      const onLoaded = () => {
+        if (done) return;
+        clean();
+        if (requestId === state.playbackRequest) resolve();
+        else reject(new DOMException("Playback replaced", "AbortError"));
+      };
+      const onError = () => {
+        if (done) return;
+        clean();
+        reject(new Error("Audio metadata could not be loaded."));
+      };
+      audio.addEventListener("loadedmetadata", onLoaded, { once: true });
+      audio.addEventListener("error", onError, { once: true });
+      timer = setTimeout(() => {
+        if (done) return;
+        clean();
+        reject(new Error("Audio loading timed out."));
+      }, timeoutMs);
+    });
+  }
+
   async function playTrack(track, list = null, index = 0, resumeAt = 0) {
     if (!track?.id) return;
     const requestId = ++state.playbackRequest;
     const newQueue = Array.isArray(list) && list.length ? list.map(trackPayload) : [trackPayload(track)];
     const safeIndex = Math.max(0, Math.min(Number(index) || 0, newQueue.length - 1));
+
     state.queue = newQueue;
     state.queueIndex = safeIndex;
     state.currentTrack = { ...newQueue[safeIndex] };
@@ -1272,64 +1319,71 @@
     state.lastHistoryTrackId = String(state.currentTrack.id);
     state.streamRecoveryAttempted = false;
     resetShuffleBag();
-    audio.pause();
-    audio.removeAttribute("src");
-    audio.load();
+    releaseAudio();
     updatePlayer();
-    try {
-      const token = await api("/api/stream-token", { method: "POST", body: JSON.stringify({ video_id: state.currentTrack.id }) });
-      if (requestId !== state.playbackRequest) return;
-      if (!token.stream_url) throw new Error("Audio server returned an invalid stream URL.");
-      audio.src = token.stream_url;
-      audio.load();
-      if (resumeAt > 0) {
-        await waitForMetadata(requestId);
-        if (requestId !== state.playbackRequest) return;
-        const duration = Number(audio.duration) || 0;
-        audio.currentTime = duration > 0 ? Math.min(resumeAt, Math.max(0, duration - 0.25)) : resumeAt;
-      }
-      if (requestId !== state.playbackRequest) return;
-      await audio.play();
-      if (requestId !== state.playbackRequest) return;
-      state.playbackLoading = false;
-      state.currentTrack = { ...state.currentTrack, stream_url: token.stream_url };
-      state.queue[state.queueIndex] = trackPayload(state.currentTrack);
-      updatePlayer();
-      setMediaSession();
-    } catch (error) {
-      if (requestId !== state.playbackRequest || error?.name === "AbortError") return;
-      state.playbackLoading = false;
-      updatePlayer();
-      showToast(error.message || "Unable to start this song.");
-      console.error("Taalune playback failed:", error);
-    }
-  }
 
-  function waitForMetadata(requestId) {
-    if (requestId !== state.playbackRequest) return Promise.reject(new DOMException("Playback replaced", "AbortError"));
-    if (audio.readyState >= 1) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      let timer;
-      const clean = () => {
-        clearTimeout(timer);
-        audio.removeEventListener("loadedmetadata", loaded);
-        audio.removeEventListener("error", failed);
-      };
-      const loaded = () => {
-        clean();
-        requestId === state.playbackRequest ? resolve() : reject(new DOMException("Playback replaced", "AbortError"));
-      };
-      const failed = () => { clean(); reject(new Error("Audio metadata could not be loaded.")); };
-      audio.addEventListener("loadedmetadata", loaded, { once: true });
-      audio.addEventListener("error", failed, { once: true });
-      timer = setTimeout(() => { clean(); reject(new Error("Audio loading timed out.")); }, 15000);
-    });
+    const MAX_ATTEMPTS = 2;
+    let lastError = null;
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      if (requestId !== state.playbackRequest) return;
+      try {
+        const token = await api("/api/stream-token", {
+          method: "POST",
+          body: JSON.stringify({ video_id: state.currentTrack.id })
+        });
+        if (requestId !== state.playbackRequest) return;
+        if (!token.stream_url) throw new Error("Audio server returned an invalid stream URL.");
+
+        audio.src = token.stream_url;
+        audio.load();
+        await waitForMetadata(requestId);
+
+        if (requestId !== state.playbackRequest) return;
+
+        if (resumeAt > 0) {
+          const duration = Number(audio.duration) || 0;
+          audio.currentTime = duration > 0
+            ? Math.min(resumeAt, Math.max(0, duration - 0.25))
+            : resumeAt;
+        }
+
+        await audio.play();
+        if (requestId !== state.playbackRequest) return;
+
+        state.playbackLoading = false;
+        state.currentTrack = { ...state.currentTrack, stream_url: token.stream_url };
+        state.queue[state.queueIndex] = trackPayload(state.currentTrack);
+        updatePlayer();
+        setMediaSession();
+        return;
+
+      } catch (error) {
+        lastError = error;
+        if (requestId !== state.playbackRequest) return;
+        if (error?.name === "AbortError") return;
+        if (attempt < MAX_ATTEMPTS - 1) {
+          await new Promise((r) => setTimeout(r, 400));
+          try { releaseAudio(); } catch (_) {}
+        }
+      }
+    }
+
+    if (requestId === state.playbackRequest) {
+      state.playbackLoading = false;
+      releaseAudio();
+      updatePlayer();
+      showToast(lastError?.message || "Unable to play this song. Try again later.");
+    }
   }
 
   async function togglePlay() {
     if (!state.currentTrack) {
       const fallback = state.homeTracks?.[0] || state.searchResults?.[0];
-      if (fallback) return playTrack(fallback, state.homeTracks?.length ? state.homeTracks : [fallback], 0);
+      if (fallback) {
+        const list = state.homeTracks?.length ? state.homeTracks : [fallback];
+        return playTrack(fallback, list, 0);
+      }
       throw new Error("Choose a song first.");
     }
     if (audio.paused) {
@@ -1341,9 +1395,7 @@
 
   function clearPersonalPlayer() {
     state.playbackRequest += 1;
-    audio.pause();
-    audio.removeAttribute("src");
-    audio.load();
+    releaseAudio();
     state.currentTrack = null;
     state.queue = [];
     state.queueIndex = -1;
@@ -1377,7 +1429,7 @@
     if (!state.queue.length) return;
     if (state.repeatMode === 2 && state.currentTrack) {
       audio.currentTime = 0;
-      await audio.play();
+      try { await audio.play(); } catch (_) {}
       return;
     }
     let nextIndex;
@@ -1411,7 +1463,7 @@
         album: "Taalune",
         artwork: track.thumbnail ? [{ src: track.thumbnail, sizes: "512x512", type: "image/jpeg" }] : []
       });
-      navigator.mediaSession.setActionHandler("play", () => audio.play());
+      navigator.mediaSession.setActionHandler("play", () => audio.play().catch(() => {}));
       navigator.mediaSession.setActionHandler("pause", () => audio.pause());
       navigator.mediaSession.setActionHandler("previoustrack", previousTrack);
       navigator.mediaSession.setActionHandler("nexttrack", nextTrack);
@@ -1437,44 +1489,30 @@
   function moveQueueItem(index, direction) {
     const source = Number(index);
     const destination = source + Number(direction);
-    if (
-      !Number.isInteger(source) ||
-      !Number.isInteger(destination) ||
-      source <= state.queueIndex ||
-      destination <= state.queueIndex ||
-      destination < 0 ||
-      destination >= state.queue.length
-    ) return;
-
-    [state.queue[source], state.queue[destination]] = [
-      state.queue[destination],
-      state.queue[source]
-    ];
-
+    if (!Number.isInteger(source) || !Number.isInteger(destination)) return;
+    if (source <= state.queueIndex || destination <= state.queueIndex) return;
+    if (destination < 0 || destination >= state.queue.length) return;
+    [state.queue[source], state.queue[destination]] = [state.queue[destination], state.queue[source]];
     resetShuffleBag();
     renderQueue();
   }
 
   async function removeQueueItem(index) {
     if (!Number.isInteger(index) || index < 0 || index >= state.queue.length) return;
-
     if (index === state.queueIndex) {
       const remaining = state.queue.slice();
       remaining.splice(index, 1);
-
       if (!remaining.length) {
         clearPersonalPlayer();
         closeModal();
         showToast("Queue cleared");
         return;
       }
-
       const nextIndex = Math.min(index, remaining.length - 1);
       await playTrack(remaining[nextIndex], remaining, nextIndex);
       renderQueue();
       return;
     }
-
     state.queue.splice(index, 1);
     if (index < state.queueIndex) state.queueIndex -= 1;
     resetShuffleBag();
@@ -1560,11 +1598,19 @@
         await playTrack(track, list, index);
         break;
       }
-      case "modal-play-track": if (state.modalTrack) { closeModal(); await playTrack(state.modalTrack); } break;
+      case "modal-play-track": if (state.modalTrack) { const track = state.modalTrack; closeModal(); await playTrack(track); } break;
       case "modal-like-track": if (state.modalTrack) { const track = state.modalTrack; closeModal(); await toggleTrackLike(track); } break;
       case "modal-group-play": if (state.modalTrack) { const track = state.modalTrack; closeModal(); await groupControl("play_track", { track: trackPayload(track) }); } break;
       case "modal-group-queue": if (state.modalTrack) { const track = state.modalTrack; closeModal(); await groupControl("queue_track", { track: trackPayload(track) }); } break;
-      case "modal-add-playlist": { const playlistId = $("trackTargetPlaylist")?.value || state.modalTargetPlaylistId || state.activePlaylist?.id; if (!playlistId || !state.modalTrack) throw new Error("Choose a playlist first."); const track = state.modalTrack; closeModal(); await addTrackToPlaylist(track, playlistId); state.modalTargetPlaylistId = ""; break; }
+      case "modal-add-playlist": {
+        const playlistId = $("trackTargetPlaylist")?.value || state.modalTargetPlaylistId || state.activePlaylist?.id;
+        if (!playlistId || !state.modalTrack) throw new Error("Choose a playlist first.");
+        const track = state.modalTrack;
+        closeModal();
+        await addTrackToPlaylist(track, playlistId);
+        state.modalTargetPlaylistId = "";
+        break;
+      }
       case "playlist-follow": await togglePlaylistFollow(id); break;
       case "like-playlist": await togglePlaylistLike(); break;
       case "play-playlist": if (!state.activePlaylist?.tracks?.length) throw new Error("This playlist is empty."); await playTrack(state.activePlaylist.tracks[0], state.activePlaylist.tracks, 0); break;
@@ -1586,7 +1632,7 @@
       case "refresh-groups": await loadGroups(0); break;
       case "load-more-groups": await loadMoreGroups(); break;
       case "select-group": await selectGroup(id); break;
-      case "playlist-report": await reportContent("playlist", state.activePlaylist?.id); break;
+      case "report-playlist": await reportContent("playlist", state.activePlaylist?.id); break;
       case "report-person": await reportContent("user", id); break;
       case "report-track": if (state.modalTrack) await reportContent("track", state.modalTrack.id); break;
       case "block-person": await blockUser(id); break;
@@ -1655,6 +1701,60 @@
     }
   }
 
+  // ============================================================
+  // AUDIO EVENTS (safe — no reloads, clean recovery)
+  // ============================================================
+
+  audio.addEventListener("timeupdate", updateProgress);
+  audio.addEventListener("loadedmetadata", updateProgress);
+  audio.addEventListener("play", updatePlayer);
+  audio.addEventListener("pause", updatePlayer);
+  audio.addEventListener("ended", async () => {
+    try { await nextTrack(); } catch (error) { showToast(error.message); }
+  });
+
+  audio.addEventListener("error", async () => {
+    if (!state.currentTrack) return;
+    if (state.playbackLoading) return;
+    if (!audio.currentSrc) return;
+    if (state.streamRecoveryAttempted) {
+      showToast("Audio stream expired. Tap play to retry.");
+      return;
+    }
+
+    state.streamRecoveryAttempted = true;
+    const trackId = String(state.currentTrack.id);
+    const requestId = state.playbackRequest;
+    const resumeAt = Math.max(0, Number(audio.currentTime) || 0);
+
+    try {
+      const token = await api("/api/stream-token", {
+        method: "POST",
+        body: JSON.stringify({ video_id: trackId }),
+      });
+      if (requestId !== state.playbackRequest || String(state.currentTrack?.id) !== trackId) return;
+      if (!token.stream_url) throw new Error("Stream refresh failed.");
+
+      audio.src = token.stream_url;
+      audio.load();
+      await waitForMetadata(requestId);
+      if (requestId !== state.playbackRequest) return;
+      const duration = Number(audio.duration) || 0;
+      audio.currentTime = duration > 0 ? Math.min(resumeAt, Math.max(0, duration - 0.25)) : resumeAt;
+      await audio.play();
+      state.currentTrack.stream_url = token.stream_url;
+      showToast("Audio source refreshed");
+    } catch (_) {
+      showToast("Audio stream expired. Tap play to retry.");
+    }
+  });
+
+  audio.volume = 0.85;
+
+  // ============================================================
+  // UI EVENT WIRING
+  // ============================================================
+
   document.addEventListener("click", async (event) => {
     const pageButton = event.target.closest("[data-page]");
     if (pageButton) {
@@ -1708,47 +1808,26 @@
     }
   });
 
-  $("seek").addEventListener("input", () => {
-    const duration = Number(audio.duration);
-    if (Number.isFinite(duration) && duration > 0) audio.currentTime = (Number($("seek").value) / 1000) * duration;
+  const seekInput = $("seek");
+  if (seekInput) {
+    seekInput.addEventListener("input", () => {
+      const duration = Number(audio.duration);
+      if (Number.isFinite(duration) && duration > 0) audio.currentTime = (Number(seekInput.value) / 1000) * duration;
+    });
+  }
+
+  // Reduce memory when backgrounded — prevents mobile browser from killing the app.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && audio.paused) {
+      try { audio.preload = "none"; } catch (_) {}
+    } else {
+      try { audio.preload = "auto"; } catch (_) {}
+    }
   });
 
-  audio.addEventListener("timeupdate", updateProgress);
-  audio.addEventListener("loadedmetadata", updateProgress);
-  audio.addEventListener("play", updatePlayer);
-  audio.addEventListener("pause", updatePlayer);
-  audio.addEventListener("ended", async () => {
-    try { await nextTrack(); } catch (error) { showToast(error.message); }
-  });
-  audio.addEventListener("error", async () => {
-    if (!state.currentTrack || state.playbackLoading || !audio.currentSrc || state.streamRecoveryAttempted) {
-      if (state.currentTrack && !state.playbackLoading && state.streamRecoveryAttempted) showToast("Audio stream could not be recovered. Try playing this song again.");
-      return;
-    }
-    state.streamRecoveryAttempted = true;
-    state.playbackLoading = true;
-    const trackId = String(state.currentTrack.id);
-    const requestId = state.playbackRequest;
-    const resumeAt = Math.max(0, Number(audio.currentTime) || 0);
-    try {
-      const token = await api("/api/stream-token", { method: "POST", body: JSON.stringify({ video_id: trackId }) });
-      if (requestId !== state.playbackRequest || String(state.currentTrack?.id) !== trackId) return;
-      audio.src = token.stream_url;
-      audio.load();
-      await waitForMetadata(requestId);
-      if (requestId !== state.playbackRequest) return;
-      const duration = Number(audio.duration) || 0;
-      audio.currentTime = duration > 0 ? Math.min(resumeAt, Math.max(0, duration - 0.25)) : resumeAt;
-      await audio.play();
-      state.currentTrack.stream_url = token.stream_url;
-      showToast("Audio source refreshed");
-    } catch (error) {
-      if (requestId === state.playbackRequest) showToast(error.message || "Audio source refresh failed.");
-    } finally {
-      if (requestId === state.playbackRequest) state.playbackLoading = false;
-    }
-  });
-  audio.volume = 0.85;
+  // ============================================================
+  // BOOT
+  // ============================================================
 
   async function boot() {
     updateRepeatButton();
@@ -1763,7 +1842,8 @@
     }
     if (!initData) {
       $("mainContent").innerHTML = emptyState("Open Taalune from the Telegram bot to sign in securely.");
-      document.querySelector(".bottom-nav").hidden = true;
+      const nav = document.querySelector(".bottom-nav");
+      if (nav) nav.hidden = true;
       return;
     }
     try {

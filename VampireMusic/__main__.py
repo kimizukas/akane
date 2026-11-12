@@ -1,7 +1,7 @@
-
 import asyncio
 import importlib
 import signal
+
 from contextlib import suppress
 
 from VampireMusic import (
@@ -15,17 +15,29 @@ from VampireMusic import (
     userbot,
     yt,
 )
+
 from VampireMusic.plugins import all_modules
-from VampireMusic.music_server.server import start_server, stop_server
+
+from VampireMusic.music_server.fastapi_server import (
+    start_server,
+    stop_server,
+)
 
 
 async def idle():
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
 
-    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGABRT):
+    for sig in (
+        signal.SIGINT,
+        signal.SIGTERM,
+        signal.SIGABRT,
+    ):
         with suppress(NotImplementedError):
-            loop.add_signal_handler(sig, stop_event.set)
+            loop.add_signal_handler(
+                sig,
+                stop_event.set,
+            )
 
     await stop_event.wait()
 
@@ -35,14 +47,20 @@ async def main():
 
     try:
         await thumb.start()
+
         await app.boot()
         await userbot.boot()
         await VampireMusic.boot()
 
         for module in all_modules:
-            importlib.import_module(f"VampireMusic.plugins.{module}")
+            importlib.import_module(
+                f"VampireMusic.plugins.{module}"
+            )
 
-        logger.info("Loaded %s modules.", len(all_modules))
+        logger.info(
+            "Loaded %s modules.",
+            len(all_modules),
+        )
 
         if config.COOKIES_URL:
             for cookie_url in config.COOKIES_URL:
@@ -50,12 +68,22 @@ async def main():
                     break
 
         sudoers = await db.get_sudoers()
+
         app.sudoers.update(sudoers)
-        app.bl_users.update(await db.get_blacklisted())
 
-        logger.info("Loaded %s sudo users.", len(app.sudoers))
+        app.bl_users.update(
+            await db.get_blacklisted()
+        )
 
+        logger.info(
+            "Loaded %s sudo users.",
+            len(app.sudoers),
+        )
+
+        # The bot, userbots and voice engine are already running.
+        # FastAPI now attaches to those existing clients.
         await start_server()
+
         await idle()
 
     finally:
@@ -66,5 +94,6 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
+
     except KeyboardInterrupt:
         pass

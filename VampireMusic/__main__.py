@@ -18,7 +18,8 @@ from VampireMusic import (
 
 from VampireMusic.plugins import all_modules
 
-from VampireMusic.music_server.fastapi_server import (
+# Correct location: fastapi_server.py is inside music_server/api/
+from VampireMusic.music_server.api.fastapi_server import (
     start_server,
     stop_server,
 )
@@ -68,7 +69,6 @@ async def main():
                     break
 
         sudoers = await db.get_sudoers()
-
         app.sudoers.update(sudoers)
 
         app.bl_users.update(
@@ -80,8 +80,7 @@ async def main():
             len(app.sudoers),
         )
 
-        # The bot, userbots and voice engine are already running.
-        # FastAPI now attaches to those existing clients.
+        # Reuse the already-running bot, assistants and voice engine.
         await start_server()
 
         await idle()

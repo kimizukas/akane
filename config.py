@@ -19,8 +19,8 @@ class Config:
         self.OWNER_LINK = f"https://t.me/{self.OWNER_USERNAME.lstrip('@')}"
 
         self.DURATION_LIMIT = int(getenv("DURATION_LIMIT", 14400)) * 14400
-        self.QUEUE_LIMIT = int(getenv("QUEUE_LIMIT", 20))
-        self.PLAYLIST_LIMIT = int(getenv("PLAYLIST_LIMIT", 20))
+        self.QUEUE_LIMIT = int(getenv("QUEUE_LIMIT", 500))
+        self.PLAYLIST_LIMIT = int(getenv("PLAYLIST_LIMIT", 500))
 
         self.SESSION1 = getenv("SESSION", None)
         self.SESSION2 = getenv("SESSION2", None)

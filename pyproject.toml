@@ -1,10 +1,16 @@
 [project]
 name = "VampireMusic"
 version = "3.0.3"
-description = "A powerful Telegram Music Bot for Group Voice Chats, supporting high-quality audio and video streaming."
+description = "Telegram music bot with Taalune FastAPI Mini App."
 readme = ".github/README.md"
 requires-python = ">=3.10"
-keywords = ["telegram", "music-bot", "voice-chat", "python", "pyrogram", "VampireMusic"]
+keywords = [
+    "telegram",
+    "music-bot",
+    "voice-chat",
+    "fastapi",
+    "pyrogram"
+]
 
 dependencies = [
     "aiohttp~=3.14.0",
@@ -19,6 +25,12 @@ dependencies = [
     "python-dotenv~=1.2.1",
     "yt-dlp[default]>=2026.3.17",
     "static_ffmpeg>=3.0",
+
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.34,<1.0",
+    "httpx>=0.28,<1.0",
+    "python-multipart>=0.0.20,<1.0",
+    "pydantic>=2.10,<3.0"
 ]
 
 [project.urls]

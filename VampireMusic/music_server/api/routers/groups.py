@@ -10,11 +10,16 @@ from fastapi import (
 from VampireMusic.music_server.api.dependencies import (
     get_group_service,
 )
+
+from VampireMusic.music_server.api.events import event_hub
+
 from VampireMusic.music_server.api.groups import (
     GroupService,
     GroupServiceError,
 )
+
 from VampireMusic.music_server.api.schemas import GroupControl
+
 from VampireMusic.music_server.api.security import (
     get_current_user,
 )
@@ -90,6 +95,19 @@ async def group_control(
             int(chat_id),
             payload,
         )
+
+        group = result.get("group")
+
+        # Connected Mini App clients subscribed to this group
+        # receive the updated player state.
+        if group:
+            await event_hub.publish_group(
+                int(chat_id),
+                {
+                    "type": "group.updated",
+                    "group": group,
+                },
+            )
 
         return {
             "ok": True,

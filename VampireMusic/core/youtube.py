@@ -1,10 +1,10 @@
-
 import asyncio
 import logging
 import os
 import re
 import shutil
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional, Union
 from urllib.parse import parse_qs, urlparse
@@ -28,14 +28,30 @@ COOKIES_FILE = SERVER_DIR / "cookies.txt"
 YOUTUBE_URL = "https://www.youtube.com/watch?v={}"
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
-_STREAM_CACHE = {}
-_STREAM_CACHE_TTL = 90
-_STREAM_CACHE_MAX = 256
+# ----------------------------------------------------------------------
+# Stream cache: bounded LRU with TTL. URLs expire fast (~6h) but we keep
+# a short local TTL so failures are picked up quickly.
+# ----------------------------------------------------------------------
+_STREAM_CACHE: "OrderedDict[str, dict]" = OrderedDict()
+_STREAM_CACHE_TTL = 60            # seconds (URLs expire; keep short)
+_STREAM_CACHE_MAX = 128           # hard cap -> memory bounded
 
-_STREAM_LOCKS = {}
-_STREAM_LOCKS_MAX = 512
+_STREAM_LOCKS: "OrderedDict[str, asyncio.Lock]" = OrderedDict()
+_STREAM_LOCKS_MAX = 256
 
-_STREAM_RESOLVE_SEMAPHORE = asyncio.Semaphore(2)
+# Limit concurrent yt-dlp calls so RAM/CPU stays predictable under load.
+_STREAM_RESOLVE_SEMAPHORE = asyncio.Semaphore(3)
+
+# Preferred audio format (Opus in WebM is small + streams well).
+_PREFERRED_FORMAT = (
+    "bestaudio[acodec=opus][ext=webm]/"
+    "bestaudio[acodec=opus]/"
+    "bestaudio[ext=webm]/"
+    "bestaudio/best"
+)
+
+# Preferred client order for fallback resolution.
+_DEFAULT_CLIENTS = ("web", "android", "ios", "tv_embedded")
 
 
 def time_to_seconds(value) -> int:
@@ -89,6 +105,13 @@ def normalize_url(value: str) -> str:
     return YOUTUBE_URL.format(video_id) if video_id else (value or "").strip()
 
 
+def _has_cookies() -> bool:
+    try:
+        return COOKIES_FILE.is_file() and COOKIES_FILE.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def _ydl_options(download: bool = False, video: bool = False) -> dict:
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -102,17 +125,21 @@ def _ydl_options(download: bool = False, video: bool = False) -> dict:
         "retries": 2,
         "fragment_retries": 2,
         "overwrites": False,
+        # Reduce memory while streaming info extraction.
+        "extractor_args": {
+            "youtube": {
+                "player_skip": ["configs"],
+            },
+        },
     }
 
-    try:
-        if COOKIES_FILE.is_file() and COOKIES_FILE.stat().st_size > 0:
-            options["cookiefile"] = str(COOKIES_FILE)
-    except OSError:
-        logger.warning("Unable to access YouTube cookies file.")
+    if _has_cookies():
+        options["cookiefile"] = str(COOKIES_FILE)
 
     if download:
         options.update({
-            "format": "bestvideo+bestaudio/best" if video else "bestaudio/best",
+            "format": "bestvideo[acodec=opus]+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
+                      if video else _PREFERRED_FORMAT,
             "outtmpl": str(DOWNLOAD_DIR / "%(id)s.%(ext)s"),
             "restrictfilenames": True,
             "windowsfilenames": True,
@@ -134,17 +161,19 @@ def _get_stream_lock(video_id: str) -> asyncio.Lock:
     if lock is None:
         lock = asyncio.Lock()
         _STREAM_LOCKS[video_id] = lock
+        _STREAM_LOCKS.move_to_end(video_id)
 
-    if len(_STREAM_LOCKS) > _STREAM_LOCKS_MAX:
-        for key, old_lock in list(_STREAM_LOCKS.items()):
-            if key == video_id:
-                continue
-
-            if not old_lock.locked():
-                _STREAM_LOCKS.pop(key, None)
-
-            if len(_STREAM_LOCKS) <= _STREAM_LOCKS_MAX:
+    # LRU eviction: only evict unlocked locks, never the one we return.
+    while len(_STREAM_LOCKS) > _STREAM_LOCKS_MAX:
+        key, candidate = next(iter(_STREAM_LOCKS.items()))
+        if key == video_id or candidate.locked():
+            # move to end and try next
+            _STREAM_LOCKS.move_to_end(key)
+            # if we reached the target again, break to avoid infinite loop
+            if next(iter(_STREAM_LOCKS)) == video_id:
                 break
+            continue
+        _STREAM_LOCKS.pop(key)
 
     return lock
 
@@ -177,70 +206,105 @@ def _cache_stream(data: dict):
         "created_at": now,
         "expires": now + _STREAM_CACHE_TTL,
     }
+    _STREAM_CACHE.move_to_end(str(video_id))
 
-    for key in list(_STREAM_CACHE):
+    # Purge expired
+    for key in list(_STREAM_CACHE.keys()):
         if _STREAM_CACHE[key]["expires"] <= now:
             _STREAM_CACHE.pop(key, None)
 
+    # LRU eviction
     while len(_STREAM_CACHE) > _STREAM_CACHE_MAX:
-        _STREAM_CACHE.pop(next(iter(_STREAM_CACHE)))
+        _STREAM_CACHE.popitem(last=False)
 
 
-def _resolve_audio_stream(video_id: str):
+def _configured_clients() -> list[str]:
+    raw = os.getenv("YTDLP_PLAYER_CLIENT", "").strip()
+    if raw:
+        clients = [item.strip() for item in raw.split(",") if item.strip()]
+        if clients:
+            return clients
+    return list(_DEFAULT_CLIENTS)
+
+
+def _resolve_audio_stream(
+    video_id: str,
+    client_override: Optional[str] = None,
+) -> dict:
+    """
+    Resolve a fresh audio URL. Tries multiple player clients so transient
+    'source not found' errors from a single client don't break playback.
+    """
     source = YOUTUBE_URL.format(video_id)
+    has_cookies = _has_cookies()
 
-    options = _ydl_options()
+    clients_to_try: list[Optional[str]]
+    if client_override:
+        clients_to_try = [client_override]
+    elif has_cookies:
+        # Cookies handle auth; only try default client selection.
+        clients_to_try = [None]
+    else:
+        clients_to_try = _configured_clients()
 
-    options.update({
-        "quiet": True,
-        "no_warnings": True,
-        "ignoreerrors": False,
-        "noplaylist": True,
-        "extract_flat": False,
-        "socket_timeout": 15,
-        "retries": 2,
-        "fragment_retries": 2,
-        "extractor_retries": 2,
-        "format": "bestaudio/best",
-    })
+    last_error: Optional[Exception] = None
 
-    # Do not force android_vr as the default client.
-    # Let yt-dlp select its supported clients so cookie authentication
-    # can be used by the YouTube extractor.
-    configured_clients = [
-        item.strip()
-        for item in os.getenv("YTDLP_PLAYER_CLIENT", "").split(",")
-        if item.strip()
-    ]
+    for client in clients_to_try:
+        options = _ydl_options()
+        options.update({
+            "ignoreerrors": False,
+            "format": _PREFERRED_FORMAT,
+        })
 
-    has_cookies = (
-        COOKIES_FILE.is_file()
-        and COOKIES_FILE.stat().st_size > 0
+        if client:
+            options["extractor_args"] = {
+                "youtube": {
+                    "player_client": [client],
+                    "player_skip": ["configs"],
+                },
+            }
+
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(source, download=False)
+
+            if not info:
+                last_error = RuntimeError("empty_info")
+                continue
+
+            if info.get("_type") == "playlist":
+                entries = [e for e in (info.get("entries") or []) if e]
+                if not entries:
+                    last_error = RuntimeError("empty_playlist")
+                    continue
+                info = entries[0]
+
+            url = info.get("url")
+            if not url:
+                last_error = RuntimeError("no_url")
+                continue
+
+            return {
+                "url": url,
+                "headers": info.get("http_headers") or {},
+                "ext": info.get("ext") or "webm",
+                "client": client or "auto",
+            }
+
+        except Exception as exc:
+            last_error = exc
+            logger.debug(
+                "Resolve attempt failed (client=%s, id=%s): %s",
+                client or "auto",
+                video_id,
+                type(exc).__name__,
+            )
+            continue
+
+    raise RuntimeError(
+        f"Audio resolution failed for {video_id}: "
+        f"{type(last_error).__name__ if last_error else 'unknown'}"
     )
-
-    # Explicit player client overrides are only applied without cookies.
-    # When cookies exist, keep yt-dlp's normal client selection.
-    if configured_clients and not has_cookies:
-        options["extractor_args"] = {
-            "youtube": {
-                "player_client": configured_clients,
-            },
-        }
-
-    with yt_dlp.YoutubeDL(options) as ydl:
-        info = ydl.extract_info(
-            source,
-            download=False,
-        )
-
-    if not info or not info.get("url"):
-        raise RuntimeError("Audio URL unavailable")
-
-    return {
-        "url": info["url"],
-        "headers": info.get("http_headers") or {},
-        "ext": info.get("ext") or "webm",
-    }
 
 
 def _make_track(
@@ -298,26 +362,17 @@ async def _fast_search_tracks(
     )
 
     try:
-        response = await asyncio.wait_for(
-            search.next(),
-            timeout=4.5,
-        )
+        response = await asyncio.wait_for(search.next(), timeout=4.5)
     finally:
         client = getattr(search, "async_client", None)
         close = getattr(client, "aclose", None)
-
         if close is not None:
             try:
                 await close()
             except Exception:
                 pass
 
-    entries = (
-        response.get("result", [])
-        if isinstance(response, dict)
-        else []
-    )
-
+    entries = response.get("result", []) if isinstance(response, dict) else []
     tracks = []
 
     for entry in entries:
@@ -330,13 +385,11 @@ async def _fast_search_tracks(
 
         if not VIDEO_ID_RE.fullmatch(video_id):
             continue
-
         if not title or duration_sec <= 0:
             continue
 
         thumbnails = entry.get("thumbnails") or []
         thumbnail = None
-
         if isinstance(thumbnails, list):
             thumbnail = next(
                 (
@@ -350,19 +403,11 @@ async def _fast_search_tracks(
             thumbnail = thumbnails.get("url")
 
         channel = entry.get("channel") or {}
-        channel_name = (
-            channel.get("name")
-            if isinstance(channel, dict)
-            else str(channel)
-        )
+        channel_name = channel.get("name") if isinstance(channel, dict) else str(channel)
 
         view_data = entry.get("viewCount") or {}
         if isinstance(view_data, dict):
-            view_count = (
-                view_data.get("text")
-                or view_data.get("short")
-                or ""
-            )
+            view_count = view_data.get("text") or view_data.get("short") or ""
         else:
             view_count = str(view_data)
 
@@ -372,17 +417,13 @@ async def _fast_search_tracks(
                 "title": title,
                 "duration": duration_sec,
                 "uploader": channel_name,
-                "webpage_url": (
-                    entry.get("link")
-                    or YOUTUBE_URL.format(video_id)
-                ),
+                "webpage_url": entry.get("link") or YOUTUBE_URL.format(video_id),
                 "thumbnail": thumbnail,
                 "view_count": view_count,
             },
             message_id,
             video,
         )
-
         if track:
             tracks.append(track)
 
@@ -398,7 +439,6 @@ class YouTubeAPI:
 
     async def stream(self, video_id: str, force_refresh: bool = False):
         video_id = extract_video_id(video_id)
-
         if not video_id:
             return None
 
@@ -414,10 +454,8 @@ class YouTubeAPI:
             cached = _STREAM_CACHE.get(video_id)
 
             if cached and cached["expires"] > now:
-                if (
-                    not force_refresh
-                    or cached.get("created_at", 0) >= request_started
-                ):
+                if not force_refresh or cached.get("created_at", 0) >= request_started:
+                    _STREAM_CACHE.move_to_end(video_id)
                     return {
                         "url": cached["url"],
                         "headers": cached["headers"],
@@ -429,10 +467,7 @@ class YouTubeAPI:
 
             try:
                 async with _STREAM_RESOLVE_SEMAPHORE:
-                    data = await asyncio.to_thread(
-                        _resolve_audio_stream,
-                        video_id,
-                    )
+                    data = await asyncio.to_thread(_resolve_audio_stream, video_id)
 
                 if not data or not data.get("url"):
                     return None
@@ -474,10 +509,7 @@ class YouTubeAPI:
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(source, allow_redirects=False) as response:
                         if response.status != 200:
-                            logger.error(
-                                "Cookie download failed: HTTP %s",
-                                response.status,
-                            )
+                            logger.error("Cookie download failed: HTTP %s", response.status)
                             return False
                         content = await response.read()
 
@@ -509,10 +541,7 @@ class YouTubeAPI:
             return True
 
         except Exception as exc:
-            logger.error(
-                "Unable to load YouTube cookies: %s",
-                type(exc).__name__,
-            )
+            logger.error("Unable to load YouTube cookies: %s", type(exc).__name__)
             return False
 
     async def exists(self, link: str, videoid: Union[bool, str] = None):
@@ -544,7 +573,6 @@ class YouTubeAPI:
         video: bool = False,
     ):
         query = str(query or "").strip()
-
         if not query:
             return None
 
@@ -557,37 +585,20 @@ class YouTubeAPI:
                     limit=1,
                 )
                 return tracks[0] if tracks else None
-
             except Exception as exc:
-                logger.warning(
-                    "Fast YouTube search failed: %s",
-                    type(exc).__name__,
-                )
+                logger.warning("Fast YouTube search failed: %s", type(exc).__name__)
                 return None
 
         try:
-            info = await asyncio.to_thread(
-                _extract_info,
-                normalize_url(query),
-            )
+            info = await asyncio.to_thread(_extract_info, normalize_url(query))
 
             if info and "entries" in info:
-                info = next(
-                    (
-                        entry
-                        for entry in (info.get("entries") or [])
-                        if entry
-                    ),
-                    None,
-                )
+                info = next((e for e in (info.get("entries") or []) if e), None)
 
             return _make_track(info, m_id, video)
 
         except Exception as exc:
-            logger.warning(
-                "YouTube URL extraction failed: %s",
-                type(exc).__name__,
-            )
+            logger.warning("YouTube URL extraction failed: %s", type(exc).__name__)
             return None
 
     async def search_multi(
@@ -598,16 +609,11 @@ class YouTubeAPI:
         limit: int = 10,
     ) -> list[Track]:
         query = str(query or "").strip()
-
         if not query:
             return []
 
         if extract_video_id(query):
-            track = await self.search(
-                query,
-                m_id,
-                video,
-            )
+            track = await self.search(query, m_id, video)
             return [track] if track else []
 
         try:
@@ -617,12 +623,8 @@ class YouTubeAPI:
                 video=video,
                 limit=limit,
             )
-
         except Exception:
-            logger.exception(
-                "Fast YouTube multi-search failed for query: %s",
-                query,
-            )
+            logger.exception("Fast YouTube multi-search failed for query: %s", query)
             return []
 
     async def playlist(
@@ -639,9 +641,7 @@ class YouTubeAPI:
             return []
 
         if videoid and not re.search(
-            r"(?:youtube(?:-nocookie)?\.com|youtu\.be)",
-            link,
-            re.I,
+            r"(?:youtube(?:-nocookie)?\.com|youtu\.be)", link, re.I
         ):
             link = self.listbase + link
 
@@ -672,8 +672,7 @@ class YouTubeAPI:
                 if not entry.get("title") or not entry.get("duration"):
                     try:
                         detail = await asyncio.to_thread(
-                            _extract_info,
-                            normalize_url(str(video_url)),
+                            _extract_info, normalize_url(str(video_url))
                         )
                         entry = detail or entry
                     except Exception:
@@ -686,21 +685,14 @@ class YouTubeAPI:
             return tracks
 
         except Exception as exc:
-            logger.warning(
-                "YouTube playlist failed: %s",
-                type(exc).__name__,
-            )
+            logger.warning("YouTube playlist failed: %s", type(exc).__name__)
             return []
 
     async def details(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + str(link)
 
-        info = await asyncio.to_thread(
-            _extract_info,
-            normalize_url(link),
-        )
-
+        info = await asyncio.to_thread(_extract_info, normalize_url(link))
         if not info:
             raise RuntimeError("Unable to fetch YouTube video details.")
 
@@ -714,35 +706,23 @@ class YouTubeAPI:
             if thumbnails:
                 thumbnail = thumbnails[-1].get("url")
 
-        return (
-            title,
-            seconds_to_time(duration_sec),
-            views,
-            thumbnail,
-        )
+        return (title, seconds_to_time(duration_sec), views, thumbnail)
 
     async def title(self, link: str, videoid: Union[bool, str] = None):
-        details = await self.details(link, videoid)
-        return details[0]
+        return (await self.details(link, videoid))[0]
 
     async def duration(self, link: str, videoid: Union[bool, str] = None):
-        details = await self.details(link, videoid)
-        return details[1]
+        return (await self.details(link, videoid))[1]
 
     async def thumbnail(self, link: str, videoid: Union[bool, str] = None):
-        details = await self.details(link, videoid)
-        return details[3]
+        return (await self.details(link, videoid))[3]
 
     async def track(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + str(link)
 
-        info = await asyncio.to_thread(
-            _extract_info,
-            normalize_url(link),
-        )
+        info = await asyncio.to_thread(_extract_info, normalize_url(link))
         track = _make_track(info)
-
         if not track:
             return None, None
 
@@ -770,18 +750,13 @@ class YouTubeAPI:
 
         try:
             info = await asyncio.to_thread(
-                _extract_info,
-                normalize_url(link),
-                True,
-                bool(video),
+                _extract_info, normalize_url(link), True, bool(video)
             )
-
             if not info:
                 return None
 
             requested = info.get("requested_downloads") or []
             filepath = requested[0].get("filepath") if requested else None
-
             if not filepath:
                 filepath = info.get("_filename")
 
@@ -791,23 +766,16 @@ class YouTubeAPI:
             video_id = info.get("id")
             if video_id:
                 matches = [
-                    path for path in DOWNLOAD_DIR.glob(f"{video_id}.*")
-                    if path.is_file()
-                    and not path.name.endswith((".part", ".ytdl"))
+                    p for p in DOWNLOAD_DIR.glob(f"{video_id}.*")
+                    if p.is_file() and not p.name.endswith((".part", ".ytdl"))
                 ]
-
                 if matches:
-                    return str(
-                        max(matches, key=lambda path: path.stat().st_mtime)
-                    )
+                    return str(max(matches, key=lambda p: p.stat().st_mtime))
 
             return None
 
         except Exception as exc:
-            logger.warning(
-                "YouTube download failed: %s",
-                type(exc).__name__,
-            )
+            logger.warning("YouTube download failed: %s", type(exc).__name__)
             return None
 
     async def detect_platform(self, link: str):
@@ -815,40 +783,26 @@ class YouTubeAPI:
             return "youtube", link
         return None
 
-    async def resolve_video(
-        self,
-        link: str,
-        message_id: int = 0,
-        platform=None,
-    ):
+    async def resolve_video(self, link: str, message_id: int = 0, platform=None):
         track = await self.search(link, message_id, video=True)
         if not track:
             return None
-
         track.file_path = await self.download(track.url, video=True)
         return track if track.file_path else None
 
     async def video(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + str(link)
-
         filepath = await self.download(link, video=True)
         return (1, filepath) if filepath else (0, "Video download failed")
 
-    async def formats(
-        self,
-        link: str,
-        videoid: Union[bool, str] = None,
-    ):
+    async def formats(self, link: str, videoid: Union[bool, str] = None):
         if videoid:
             link = self.base + str(link)
 
         def extract_formats():
             with yt_dlp.YoutubeDL(_ydl_options()) as ydl:
-                return ydl.extract_info(
-                    normalize_url(link),
-                    download=False,
-                )
+                return ydl.extract_info(normalize_url(link), download=False)
 
         info = await asyncio.to_thread(extract_formats)
         formats = []
@@ -867,26 +821,17 @@ class YouTubeAPI:
         return formats, normalize_url(link)
 
     async def slider(
-        self,
-        link: str,
-        query_type: int,
-        videoid: Union[bool, str] = None,
+        self, link: str, query_type: int, videoid: Union[bool, str] = None
     ):
         if videoid:
             link = self.base + str(link)
 
         tracks = await self.search_multi(link, limit=10)
-
         if not 0 <= query_type < len(tracks):
             return None, None, None, None
 
         track = tracks[query_type]
-        return (
-            track.title,
-            track.duration,
-            track.thumbnail,
-            track.id,
-        )
+        return (track.title, track.duration, track.thumbnail, track.id)
 
 
 YouTube = YouTubeAPI
